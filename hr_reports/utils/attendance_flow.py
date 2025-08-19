@@ -1,4 +1,4 @@
-#attendance_flow.py
+# attendance_flow.py
 import frappe
 import os
 from hr_reports.utils.clean_crystal_excel import clean_crystal_excel
@@ -73,9 +73,11 @@ def process_uploaded_file(doc, method):
     # Step 4: Trigger the Import
     # ------------------------
     frappe.logger().info(f"[Attendance Flow] Step 4: Starting background import for {data_import.name}...")
-    start_import(data_import.name)
-
-    frappe.msgprint(f"Step 4: Import started for {data_import.name}. Check Import Log for details.")
+    try:
+        start_import(data_import.name)
+        frappe.msgprint(f"Step 4: Import started for {data_import.name}. Check Import Log for details.")
+    except Exception as e:
+        frappe.throw(f"Import failed: {str(e)}")
 
     # ------------------------
     # Done
