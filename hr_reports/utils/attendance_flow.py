@@ -2,7 +2,7 @@
 import frappe
 import os
 # from hr_reports.utils.clean_format.clean_crystal_excel import clean_crystal_excel
-from hr_reports.utils.clean_format.clean_daily_inout import clean_daily_inout
+from hr_reports.utils.clean_format.clean_daily_inout24 import clean_daily_inout24
 from frappe.core.doctype.data_import.data_import import start_import
 
 
@@ -36,13 +36,13 @@ def process_uploaded_file(doc, method):
 
         # Choose cleaning function based on Branch
         if doc.branch == "Lanjigarh":
-            clean_daily_inout(
+            clean_daily_inout24(
                 input_path=local_path,
                 output_path=cleaned_path,
                 company=doc.company,
                 branch=doc.branch
             )
-            append_log(doc, "Step 2: Used clean_daily_inout for Lanjigarh")
+            append_log(doc, "Step 2: Used clean_daily_inout24 for Lanjigarh")
         # else:  # Default (e.g. Pune, others)
         #     clean_crystal_excel(
         #         input_path=local_path,

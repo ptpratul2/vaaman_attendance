@@ -1,15 +1,15 @@
-# clean_daily_inout.py
+# clean_daily_inout24.py
 import os
 import pandas as pd
 import frappe
 
-def clean_daily_inout(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
+def clean_daily_inout24(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
     print("=" * 80)
-    print("[clean_daily_inout] Starting")
-    print(f"[clean_daily_inout] Input: {input_path}")
-    print(f"[clean_daily_inout] Output: {output_path}")
-    print(f"[clean_daily_inout] Company: {company}")
-    print(f"[clean_daily_inout] Branch: {branch}")
+    print("[clean_daily_inout24] Starting")
+    print(f"[clean_daily_inout24] Input: {input_path}")
+    print(f"[clean_daily_inout24] Output: {output_path}")
+    print(f"[clean_daily_inout24] Company: {company}")
+    print(f"[clean_daily_inout24] Branch: {branch}")
     print("=" * 80)
 
     if not os.path.exists(input_path):
@@ -17,7 +17,7 @@ def clean_daily_inout(input_path: str, output_path: str, company: str = None, br
 
     # Load the file
     df_raw = pd.read_excel(input_path, engine="openpyxl")
-    print(f"[clean_daily_inout] Loaded raw DataFrame shape: {df_raw.shape}")
+    print(f"[clean_daily_inout24] Loaded raw DataFrame shape: {df_raw.shape}")
 
     # Required columns from raw report
     required_cols = ["Name", "Gate Pass", "Date", "Intime", "Outtime", "GROSSHOURS", "Shift"]
@@ -44,7 +44,7 @@ def clean_daily_inout(input_path: str, output_path: str, company: str = None, br
             emp_doc = frappe.get_doc("Employee", {"attendance_device_id": gate_pass})
             employee_id = emp_doc.name
         except Exception:
-            print(f"[clean_daily_inout] WARNING: Employee not found for Gate Pass {gate_pass}")
+            print(f"[clean_daily_inout24] WARNING: Employee not found for Gate Pass {gate_pass}")
 
         # ------------------------
         # Determine Status
@@ -71,7 +71,7 @@ def clean_daily_inout(input_path: str, output_path: str, company: str = None, br
 
     # Drop rows without employee/date
     df_final = df_final.dropna(subset=["Attendance Date", "Employee"], how="any")
-    print(f"[clean_daily_inout] Built final DataFrame with {len(df_final)} rows")
+    print(f"[clean_daily_inout24] Built final DataFrame with {len(df_final)} rows")
 
     if df_final.empty:
         raise ValueError("No attendance records parsed from Daily In-Out report.")
@@ -81,7 +81,7 @@ def clean_daily_inout(input_path: str, output_path: str, company: str = None, br
         os.makedirs(out_dir, exist_ok=True)
 
     df_final.to_excel(output_path, index=False)
-    print(f"[clean_daily_inout] Saved output to: {output_path}")
-    print("[clean_daily_inout] Done ✅")
+    print(f"[clean_daily_inout24] Saved output to: {output_path}")
+    print("[clean_daily_inout24] Done ✅")
 
     return df_final
