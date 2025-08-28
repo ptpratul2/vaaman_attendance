@@ -1,8 +1,9 @@
 # attendance_flow.py
 import frappe
 import os
-# from hr_reports.utils.clean_format.clean_crystal_excel import clean_crystal_excel
+from hr_reports.utils.clean_format.clean_crystal_excel import clean_crystal_excel
 from hr_reports.utils.clean_format.clean_daily_inout24 import clean_daily_inout24
+from hr_reports.utils.clean_format.clean_daily_inout14 import clean_daily_inout14
 from frappe.core.doctype.data_import.data_import import start_import
 
 
@@ -35,7 +36,15 @@ def process_uploaded_file(doc, method):
         cleaned_path = os.path.join(cleaned_dir, f"cleaned_{os.path.splitext(file_name)[0]}.xlsx")
 
         # Choose cleaning function based on Branch
-        if doc.branch == "Lanjigarh":
+        if doc.branch == "VEDANTA PLANT II":
+            clean_daily_inout14(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout14 for Vedanta Plant II")
+        elif doc.branch == "Lanjigarh":
             clean_daily_inout24(
                 input_path=local_path,
                 output_path=cleaned_path,
@@ -43,14 +52,15 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout24 for Lanjigarh")
-        # else:  # Default (e.g. Pune, others)
-        #     clean_crystal_excel(
-        #         input_path=local_path,
-        #         output_path=cleaned_path,
-        #         company=doc.company,
-        #         branch=doc.branch
-        #     )
-        #     append_log(doc, "Step 2: Used clean_crystal_excel for default format")
+        else:
+            clean_crystal_excel(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_crystal_excel for default format")
+
 
         append_log(doc, f"Step 2: Cleaned file saved at {cleaned_path}")
 
