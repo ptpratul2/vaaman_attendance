@@ -1,4 +1,3 @@
-# clean_daily_inout14.py
 import os
 import pandas as pd
 import frappe
@@ -46,6 +45,29 @@ def format_datetime(date_val, time_val):
         hours = 12  # midnight = 12 AM
 
     return date_val.strftime("%d-%m-%Y") + f" {hours:02d}:{minutes:02d}:{seconds:02d} {suffix}"
+
+
+def _to_float_workhrs(time_str):
+    """Convert 'HH:MM:SS' → float hours e.g. '08:53:09' → 8.53"""
+    if not time_str or str(time_str).lower() in ["nan", "none"]:
+        return 0.0
+    try:
+        parts = str(time_str).split(":")
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        s = int(parts[2]) if len(parts) > 2 else 0
+        return round(h + m/60 + s/3600, 2)  # keep 2 decimals
+    except Exception:
+        return 0.0
+
+
+def _calculate_overtime(work_hrs_str, shift):
+    """Overtime calculation as per logic"""
+    default_shift_hrs = {"A": 8, "B": 8, "C": 8, "G": 7}
+    work_float = _to_float_workhrs(work_hrs_str)
+    shift_hrs = default_shift_hrs.get(str(shift).upper(), 0)
+    overtime = round(work_float - shift_hrs - 0.60, 2)
+    return overtime
 
 
 def clean_daily_inout14(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
@@ -98,6 +120,9 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
         in_time_fmt = format_datetime(att_date, time_in) or format_datetime(att_date, "09:00:00")
         out_time_fmt = format_datetime(att_date, time_out) or format_datetime(att_date, "17:00:00")
 
+        # Overtime calculation
+        overtime_val = _calculate_overtime(work_hrs, shift)
+
         rec = {
             "Attendance Date": pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
             "Employee": employee_id if employee_id else "",
@@ -108,7 +133,8 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
             "Company": company if company else "",
             "Branch": branch if branch else "",
             "Working Hours": work_hrs,
-            "Shift": shift if shift else ""
+            "Shift": shift if shift else "",
+            "Over Time": overtime_val
         }
         records.append(rec)
 

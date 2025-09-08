@@ -25,6 +25,37 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
     if missing:
         raise ValueError(f"Missing required columns in input: {missing}")
 
+    # ------------------------------------------------------
+    # Function: format "Extra/Less Hours" → decimal-like str
+    # ------------------------------------------------------
+    def format_extra_less(v):
+     if pd.isna(v):
+        return ""
+
+    # Case 1: Excel gave us a datetime.time or Timestamp
+     if hasattr(v, "hour") and hasattr(v, "minute"):
+        h = v.hour
+        m = v.minute
+        s = v.second
+        # If there are seconds → keep them as .ss, else only hh.mm
+        if s:
+            return f"{h}.{s:02d}"
+        else:
+            return f"{h}.{m:02d}"
+
+    # Case 2: It’s already a string like -1:-22: or 4:30
+     s = str(v).strip()
+     if not s:
+        return ""
+
+    # Replace last ":" with "."
+     if ":" in s:
+        parts = s.split(":")
+        if len(parts) >= 2:
+            return ":".join(parts[:-1]) + "." + parts[-1]
+
+     return s
+
     records = []
 
     for _, row in df_raw.iterrows():
@@ -35,6 +66,7 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
         outtime = str(row.get("Outtime")).strip() if pd.notna(row.get("Outtime")) else None
         gross_hours = str(row.get("GROSSHOURS")).strip() if pd.notna(row.get("GROSSHOURS")) else None
         shift = str(row.get("Shift")).strip() if pd.notna(row.get("Shift")) else None
+        over_time = format_extra_less(row.get("Extra/Less Hours"))
 
         # ------------------------
         # Map Gate Pass → Employee ID
@@ -63,7 +95,8 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             "Company": company if company else "",
             "Branch": branch if branch else "",
             "Working Hours": gross_hours,
-            "Shift": shift if shift else ""
+            "Shift": shift if shift else "",
+            "Over Time": over_time  # ✅ new column
         }
         records.append(rec)
 

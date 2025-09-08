@@ -13,7 +13,13 @@ frappe.query_reports["Overtime Mismatch"] = {
         let formatted = default_formatter(value, row, column, data);
         try {
             if (data && data._mismatch_fields && data._mismatch_fields.indexOf(column.fieldname) !== -1) {
-                return `<span style="color:red">${formatted}</span>`;
+                 return `<span style="
+                    background-color: #FF0000;
+                    color: black;
+                    display: block;
+                    width: 100%;
+                    height: 100%;
+                ">${formatted}</span>`;
             }
         } catch (e) {}
         return formatted;
