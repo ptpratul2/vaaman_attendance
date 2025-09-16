@@ -4,6 +4,7 @@ import os
 from hr_reports.utils.clean_format.clean_crystal_excel import clean_crystal_excel
 from hr_reports.utils.clean_format.clean_daily_inout24 import clean_daily_inout24
 from hr_reports.utils.clean_format.clean_daily_inout14 import clean_daily_inout14
+from hr_reports.utils.clean_format.clean_daily_inout4 import clean_daily_inout4
 from frappe.core.doctype.data_import.data_import import start_import
 
 
@@ -44,6 +45,7 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout14 for Vedanta Plant II")
+
         elif doc.branch == "Lanjigarh":
             clean_daily_inout24(
                 input_path=local_path,
@@ -52,6 +54,16 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout24 for Lanjigarh")
+
+        elif doc.branch == "Rudrapur":
+            clean_daily_inout4(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout4 for Rudrapur")
+
         else:
             clean_crystal_excel(
                 input_path=local_path,
@@ -60,7 +72,6 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_crystal_excel for default format")
-
 
         append_log(doc, f"Step 2: Cleaned file saved at {cleaned_path}")
 
