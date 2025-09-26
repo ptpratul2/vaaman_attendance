@@ -36,9 +36,10 @@ def process_uploaded_file(doc, method):
         cleaned_dir = frappe.get_site_path("private", "files", "cleaned_reports")
         os.makedirs(cleaned_dir, exist_ok=True)
         cleaned_path = os.path.join(cleaned_dir, f"cleaned_{os.path.splitext(file_name)[0]}.xlsx")
+        hzl = ["HZL SK MILL","HZL RD PASTEFILL","HZL Debari O&M","HZL Debari MH","HZL Zawar Stores","HZL SKM Shaft","HZL SKM MH","HZL SKM Conveyor","HZL RDM MH","HZL Ram MH","HZL Pyro O&M","HZL Kayad MH","HZL Debari MCTP","HZL Dariba MH","HZL Chanderia MH","HZL Silver Pantnagar","HZL Pantnagar","HZL Haridwar"]
 
         # Choose cleaning function based on Branch
-        if doc.branch == "VEDANTA PLANT II":
+        if doc.branch in ["Vedanta Jharsuguda P2","Vedanta Jharsuguda P1"]:
             clean_daily_inout14(
                 input_path=local_path,
                 output_path=cleaned_path,
@@ -47,7 +48,7 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout14 for Vedanta Plant II")
 
-        elif doc.branch == "Lanjigarh":
+        elif doc.branch == "Vedanta Lanjigarh":
             clean_daily_inout24(
                 input_path=local_path,
                 output_path=cleaned_path,
@@ -56,7 +57,8 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout24 for Lanjigarh")
 
-        elif doc.branch == "Rudrapur":
+            # doc.branch == "HZL Pantnagar" or doc.branch == "HZL Debari O&M" :
+        elif doc.branch in hzl:
             clean_daily_inout4(
                 input_path=local_path,
                 output_path=cleaned_path,
