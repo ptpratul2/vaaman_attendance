@@ -5,6 +5,7 @@ from hr_reports.utils.clean_format.clean_crystal_excel import clean_crystal_exce
 from hr_reports.utils.clean_format.clean_daily_inout24 import clean_daily_inout24
 from hr_reports.utils.clean_format.clean_daily_inout14 import clean_daily_inout14
 from hr_reports.utils.clean_format.clean_daily_inout4 import clean_daily_inout4
+from hr_reports.utils.clean_format.clean_daily_inout13 import clean_daily_inout13
 from frappe.core.doctype.data_import.data_import import start_import
 
 
@@ -63,6 +64,15 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout4 for Rudrapur")
+            
+        elif doc.branch == "DOLVI":
+            clean_daily_inout13(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout13 for DOLVI")
 
         else:
             clean_crystal_excel(
