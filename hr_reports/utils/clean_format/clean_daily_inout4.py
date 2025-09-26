@@ -177,11 +177,12 @@ def format_timestamp(date_str: str, time_val, is_checkin: bool) -> Optional[str]
 def map_status(raw_status) -> str:
    s = "" if pd.isna(raw_status) else str(raw_status).strip()
    mapping = {
-       "P": "Present", "POW": "Present",
+       "P": "Present", "POW": "Present", "POH": "Present",
        "A": "Absent", "A1": "Absent",
-       "WO": "Holiday", "H": "Holiday",
-       "CL": "On Leave", "PL": "On Leave", "SL": "On Leave", "EL": "On Leave", "RL": "On Leave", "LWP": "On Leave", "SDL": "On Leave", "QL": "On Leave", "TU": "On Leave", "CO": "On Leave", "TR": "On Leave", "OH": "On Leave", "ML": "On Leave",
-       "MIS": "Half Day",  "HD": "Half Day", "HALF": "Half Day",
+       "WO": "Holiday", "H": "Holiday", 
+       "CL": "On Leave", "PL": "On Leave", "SL": "On Leave", "EL": "On Leave", "RL": "On Leave", "LWP": "On Leave", "SDL": "On Leave", "QL": "On Leave", "TU": "On Leave", "CO": "On Leave", "TR": "On Leave", "OH": "On Leave", "ML": "On Leave", "CH": "On Leave",
+       "MIS": "Half Day",  "HD": "Half Day", "HALF": "Half Day", "HLD": "Half Day",
+       "WOH": "Work From Home","WFH": "Work From Home"
    }
    return mapping.get(s, s)
 
