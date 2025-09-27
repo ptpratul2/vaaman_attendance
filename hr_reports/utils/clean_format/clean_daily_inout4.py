@@ -39,27 +39,42 @@ def convert_xls_to_xlsx(xls_path: str) -> str:
 # =========
 # Helpers
 # =========
-def parse_period_month(df: pd.DataFrame, max_rows: int = 5) -> datetime:
-   """
-   Parse month/year from header like:
-   'Performance Register from 01/07/2025 to 31/07/2025'
-   """
-   for i in range(min(max_rows, len(df))):
-       row_text = " ".join([str(x) for x in df.iloc[i].dropna().astype(str).tolist()])
-       # dd/mm/yyyy or d/m/yyyy
-       m = re.search(r'from\s+(\d{1,2}[/-]\d{1,2}[/-]\d{4})\s+to\s+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
-                     row_text, re.IGNORECASE)
-       if m:
-           try:
-               dt = datetime.strptime(m.group(1).replace("-", "/"), "%d/%m/%Y")
-               print(f"[parse_period_month] Using month from: {m.group(1)} -> {dt:%Y-%m}")
-               return dt
-           except Exception:
-               pass
-   # fallback: today
-   today = datetime.today()
-   print(f"[parse_period_month] Period not found in first {max_rows} rows. Using today: {today:%Y-%m}")
-   return today
+def parse_period_month(df: pd.DataFrame, max_rows: int = 15) -> datetime:
+    """
+    Parse month/year from header like:
+    'Performance Register from 01/07/2025 to 31/07/2025'
+    """
+    for i in range(min(max_rows, len(df))):
+        row_text = " ".join([str(x) for x in df.iloc[i].dropna().astype(str).tolist()])
+        clean_text = row_text.replace("\xa0", " ")  # replace non-breaking space
+
+        # DEBUG log before regex
+        print(f"[DEBUG parse_period_month] Row {i} raw: {row_text!r}")
+        print(f"[DEBUG parse_period_month] Row {i} cleaned: {clean_text!r}")
+
+        m = re.search(
+            r'from\s+(\d{1,2}[/-]\d{1,2}[/-]\d{4})\s+to\s+(\d{1,2}[/-]\d{1,2}[/-]\d{4})',
+            clean_text,
+            re.IGNORECASE,
+        )
+
+        # DEBUG log after regex
+        if m:
+            print(f"[DEBUG parse_period_month] Row {i} -> regex matched groups: {m.groups()}")
+            try:
+                dt = datetime.strptime(m.group(1).replace("-", "/"), "%d/%m/%Y")
+                print(f"[parse_period_month] Using month from: {m.group(1)} -> {dt:%Y-%m}")
+                return dt
+            except Exception as e:
+                print(f"[ERROR parse_period_month] Failed to parse date {m.group(1)}: {e}")
+        else:
+            print(f"[DEBUG parse_period_month] Row {i} -> regex did not match")
+
+    # fallback: today
+    today = datetime.today()
+    print(f"[parse_period_month] Period not found in first {max_rows} rows. Using today: {today:%Y-%m}")
+    return today
+
 
 
 def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
@@ -376,7 +391,9 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
    )
 
    if df_final.empty:
-       raise ValueError("No attendance records parsed from Rudrapur report. Check the row offsets and formats.")
+       raise ValueError( "❌ No attendance records could be parsed. "
+        "Please check that the uploaded file matches the selected Branch "
+        "and that the file format is correct.")
 
    # save
    out_dir = os.path.dirname(output_path)
