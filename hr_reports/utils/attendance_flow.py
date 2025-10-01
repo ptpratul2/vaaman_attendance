@@ -106,23 +106,30 @@ def process_uploaded_file(doc, method):
             "import_type": "Insert New Records",
             "reference_doctype": "Attendance",
             "import_file": cleaned_file_doc.file_url,
-            "submit_after_import": 0,   # set to 1 if you want Attendance auto-submitted
+            "submit_after_import": 1,   # set to 1 if you want Attendance auto-submitted
             "mute_emails": 1
         })
         data_import.save(ignore_permissions=True)
+        data_import.db_set("custom_crystal_upload_ref", doc.name, update_modified=False)
+
         frappe.db.commit()
 
-        append_log(doc, f"Step 3: Data Import {data_import.name} created")
+        append_log(doc, f"Step 3: Data Import {data_import.name} created and linked")
 
         # ------------------------
         # Step 4: Trigger the Import
         # ------------------------
         try:
+            frappe.flags.current_crystal_upload = doc.name
+
             start_import(data_import.name)
             append_log(doc, f"Step 4: Import started for {data_import.name}. Check Import Log for details.")
         except Exception as e:
             append_log(doc, f"❌ Import failed: {str(e)}")
             raise
+        finally:
+            frappe.flags.current_crystal_upload = None  # always clear
+
 
         # ------------------------
         # Done
@@ -132,3 +139,60 @@ def process_uploaded_file(doc, method):
     except Exception as e:
         append_log(doc, f"❌ ERROR: {str(e)}")
         raise
+
+
+def cancel_uploaded_file(doc, method):
+    """Triggered when Crystal Attendance Upload is cancelled"""
+    try:
+        append_log(doc, "Cancel triggered → rolling back imported attendance")
+
+        # 1. Delete Attendance linked to this upload
+        attendances = frappe.get_all(
+            "Attendance",
+            filters={"custom_crystal_upload_ref": doc.name},
+            pluck="name"
+        )
+        for att in attendances:
+            try:
+                att_doc = frappe.get_doc("Attendance", att)
+                att_doc.cancel() if att_doc.docstatus == 1 else att_doc.delete()
+                append_log(doc, f"Removed Attendance {att}")
+            except Exception as e:
+                append_log(doc, f"❌ Failed to remove Attendance {att}: {str(e)}")
+
+        # 2. Delete Data Import if exists
+        data_imports = frappe.get_all(
+            "Data Import",
+            filters={"import_file": ["like", f"%cleaned_{doc.name}%"]},
+            pluck="name"
+        )
+        for di in data_imports:
+            try:
+                frappe.delete_doc("Data Import", di, force=1)
+                append_log(doc, f"Removed Data Import {di}")
+            except Exception as e:
+                append_log(doc, f"❌ Failed to remove Data Import {di}: {str(e)}")
+
+        # 3. Optionally remove cleaned report file
+        cleaned_dir = frappe.get_site_path("private", "files", "cleaned_reports")
+        for f in os.listdir(cleaned_dir):
+            if f"cleaned_{doc.name}" in f:
+                try:
+                    os.remove(os.path.join(cleaned_dir, f))
+                    append_log(doc, f"Removed cleaned file {f}")
+                except Exception:
+                    pass
+
+        append_log(doc, "✅ Cancel complete: Attendance + imports removed")
+
+    except Exception as e:
+        append_log(doc, f"❌ Cancel error: {str(e)}")
+        raise
+
+def after_insert_attendance(doc, method):
+    """Automatically stamp Attendance with current Crystal Upload ref if available"""
+    if frappe.flags.current_crystal_upload:
+        frappe.logger().debug(f"[DEBUG] Stamping {doc.name} with {frappe.flags.current_crystal_upload}")
+        doc.db_set("custom_crystal_upload_ref", frappe.flags.current_crystal_upload, update_modified=False)
+    else:
+        frappe.logger().debug(f"[DEBUG] No crystal_upload_ref set for {doc.name}")

@@ -8,7 +8,11 @@ app_license = "mit"
 
 doc_events = {
     "Crystal Attendance Upload": {
-        "on_submit": "hr_reports.utils.attendance_flow.process_uploaded_file"
+        "on_submit": "hr_reports.utils.attendance_flow.process_uploaded_file",
+        "on_cancel": "hr_reports.utils.attendance_flow.cancel_uploaded_file"
+    },
+    "Attendance": {
+        "after_insert": "hr_reports.utils.attendance_flow.after_insert_attendance"
     }
 }
 
