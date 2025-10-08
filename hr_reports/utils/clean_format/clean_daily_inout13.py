@@ -150,14 +150,7 @@ def clean_daily_inout13(input_path: str, output_path: str, company: str = None, 
             continue
 
 
-        employee_id = None
-        if emp_id:
-            try:
-                employee_id = frappe.get_value("Employee", {"attendance_device_id": emp_id}, "name")
-                if not employee_id:
-                    print(f"[clean_daily_inout13] WARNING: No Employee found for device ID {emp_id}")
-            except Exception as e:
-                print(f"[clean_daily_inout13] ERROR while fetching employee for ID {emp_id}: {e}")
+        employee_id = emp_id
 
 
         in_time_fmt = format_datetime(att_date, time_in)
