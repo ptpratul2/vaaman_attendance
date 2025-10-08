@@ -109,6 +109,36 @@ def build_date_map(date_row: pd.Series, month_dt: datetime) -> Dict[int, str]:
     print(f"[build_date_map] Date map built with {len(date_map)} columns")
     return date_map
 
+def _to_float_workhrs(time_val):
+    """Convert time like '08:15' or '1900-01-24 08:15:13' into float 8.15"""
+    if not time_val or str(time_val).lower() in ["nan", "none"]:
+        return 0.0
+
+    if isinstance(time_val, (datetime, pd.Timestamp)):
+        h, m = time_val.hour, time_val.minute
+        return float(f"{h:02d}.{m:02d}")
+
+    try:
+        dt = pd.to_datetime(str(time_val), errors="coerce")
+        if pd.isna(dt):
+            return 0.0
+        h, m = dt.hour, dt.minute
+        return float(f"{h:02d}.{m:02d}")
+    except Exception:
+        return 0.0
+
+
+def _calculate_overtime(work_hrs_val, shift):
+    """Calculate OT, skip if negative"""
+    default_shift_hrs = {"A": 8, "B": 8, "C": 8, "G": 7}
+    shift_hrs = default_shift_hrs.get(str(shift).upper(), 0)
+    work_float = (
+        work_hrs_val if isinstance(work_hrs_val, (int, float)) else _to_float_workhrs(work_hrs_val)
+    )
+
+    overtime_val = round(work_float - shift_hrs - 0.60, 2)
+    return "" if overtime_val < 0 else overtime_val
+
 
 # -------------------------
 # Employee row detection
@@ -345,7 +375,7 @@ def clean_daily_inout11(input_path: str, output_path: str, company: str = None, 
                 "In Time": in_ts,
                 "Out Time": out_ts,
                 "Working Hours": "" if pd.isna(tot_val) else str(tot_val).strip(),
-                "Over Time": "",
+                "Over Time":  _calculate_overtime(tot_val, shift_code),
                 "Shift": shift_code,
                 "Company": company if company else "Vaaman Engineers India Limited",
                 "Branch": branch if branch else "",

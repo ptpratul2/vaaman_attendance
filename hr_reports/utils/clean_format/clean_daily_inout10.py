@@ -102,11 +102,16 @@ def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
         return "C"
     return "G"
 
-def _calculate_overtime(work_hrs_str, shift):
+def _calculate_overtime(work_hrs_val, shift):
     default_shift_hrs = {"A": 8, "B": 8, "C": 8, "G": 7}
-    work_float = _to_float_workhrs(work_hrs_str)
     shift_hrs = default_shift_hrs.get(str(shift).upper(), 0)
-    return round(work_float - shift_hrs - 0.60, 2)
+
+    work_float = work_hrs_val if isinstance(work_hrs_val, (int, float)) else _to_float_workhrs(work_hrs_val)
+    overtime_val = round(work_float - shift_hrs - 0.60, 2)
+
+    # Skip negative OT values (make blank cell)
+    return "" if overtime_val < 0 else overtime_val
+
 
 def clean_daily_inout10(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
     print("="*80)

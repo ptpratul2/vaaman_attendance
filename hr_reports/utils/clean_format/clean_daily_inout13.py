@@ -71,9 +71,13 @@ def map_status(raw_status) -> str:
 
 def _calculate_overtime(work_hrs_str, shift):
     default_shift_hrs = {"A": 8, "B": 8, "C": 8, "G": 7}
-    work_float = _to_float_workhrs(work_hrs_str)
     shift_hrs = default_shift_hrs.get(str(shift).upper(), 0)
-    return round(work_float - shift_hrs - 0.60, 2)
+
+    work_float = _to_float_workhrs(work_hrs_str)
+    overtime_val = round(work_float - shift_hrs - 0.60, 2)
+
+    # If OT is negative, return blank
+    return "" if overtime_val < 0 else overtime_val
 
 def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
     def get_hour(ts: Optional[str]) -> Optional[int]:
