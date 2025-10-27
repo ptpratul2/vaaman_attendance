@@ -70,7 +70,7 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout4 for Rudrapur")
             
-        elif doc.branch == "DOLVI":
+        elif doc.branch == "JSW Dolvi BF":
             clean_daily_inout13(
                 input_path=local_path,
                 output_path=cleaned_path,
