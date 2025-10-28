@@ -70,7 +70,7 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout4 for Rudrapur")
             
-        elif doc.branch == "JSW Dolvi BF":
+        elif doc.branch in ["DOLVI","JSW DOLVI","JSW Dolvi BF"]:
             clean_daily_inout13(
                 input_path=local_path,
                 output_path=cleaned_path,
@@ -88,7 +88,7 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout11 for Kakinada")
 
-        elif doc.branch == "Balco":
+        elif doc.branch in ["Balco", "Balco CH"]:
             clean_daily_inout10(
                 input_path=local_path,
                 output_path=cleaned_path,
@@ -97,7 +97,7 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout10 for Balco")
 
-        elif doc.branch == "PARADIP":
+        elif doc.branch in ["PARADIP", "JSW Paradeep"]:
             clean_daily_inout29(
                 input_path=local_path,
                 output_path=cleaned_path,

@@ -1,9 +1,35 @@
 # hr_reports/utils/clean_format/clean_daily_inout13.py
 import os
+import tempfile
 import pandas as pd
 import frappe
+import xlrd
+from openpyxl import Workbook
 from datetime import datetime, timedelta
 from typing import Optional
+
+# =========================
+# .xls -> .xlsx conversion
+# =========================
+def convert_xls_to_xlsx(xls_path: str) -> str:
+    print(f"[convert_xls_to_xlsx] Converting .xls to .xlsx: {xls_path}")
+    book = xlrd.open_workbook(xls_path, formatting_info=False)
+    sheet = book.sheet_by_index(0)
+    wb = Workbook()
+    ws = wb.active
+    for r in range(sheet.nrows):
+        for c in range(sheet.ncols):
+            cell_value = sheet.cell_value(r, c)
+            if sheet.cell_type(r, c) == xlrd.XL_CELL_DATE:
+                try:
+                    cell_value = xlrd.xldate_as_datetime(cell_value, book.datemode)
+                except Exception:
+                    pass
+            ws.cell(row=r + 1, column=c + 1).value = cell_value
+    temp_xlsx = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx").name
+    wb.save(temp_xlsx)
+    print(f"[convert_xls_to_xlsx] Saved temporary .xlsx: {temp_xlsx}")
+    return temp_xlsx
 
 def format_datetime(date_val, time_val):
     if pd.isna(date_val):
@@ -117,7 +143,14 @@ def clean_daily_inout13(input_path: str, output_path: str, company: str = None, 
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    df_raw = pd.read_excel(input_path, engine="openpyxl")
+    # Check if .xls file needs conversion
+    working_file = input_path
+    temp_created = False
+    if input_path.lower().endswith(".xls"):
+        working_file = convert_xls_to_xlsx(input_path)
+        temp_created = True
+
+    df_raw = pd.read_excel(working_file, engine="openpyxl")
     print(f"[clean_daily_inout13] Loaded raw DataFrame shape: {df_raw.shape}")
 
     required_cols = ["Employee ID", "Attand Date", "Employee Name", "Status", "In Time", "Out Time", "Total Hour"]
@@ -186,6 +219,15 @@ def clean_daily_inout13(input_path: str, output_path: str, company: str = None, 
 
     df_final.to_excel(output_path, index=False)
     print(f"[clean_daily_inout13] Saved output to: {output_path}")
+
+    # Clean up temporary file if created
+    if temp_created and os.path.exists(working_file):
+        try:
+            os.unlink(working_file)
+            print(f"[clean_daily_inout13] Removed temporary file: {working_file}")
+        except Exception:
+            pass
+
     print("[clean_daily_inout13] Done ✅")
 
     return df_final
