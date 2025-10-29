@@ -183,7 +183,14 @@ def clean_daily_inout13(input_path: str, output_path: str, company: str = None, 
             continue
 
 
-        employee_id = emp_id
+        # Map Employee ID (Gate Pass No) → Employee
+        employee_id = None
+        if emp_id:
+            try:
+                emp_doc = frappe.get_doc("Employee", {"attendance_device_id": emp_id})
+                employee_id = emp_doc.name
+            except Exception:
+                print(f"[clean_daily_inout13] WARNING: Employee not found for GP No {emp_id}")
 
 
         in_time_fmt = format_datetime(att_date, time_in)
