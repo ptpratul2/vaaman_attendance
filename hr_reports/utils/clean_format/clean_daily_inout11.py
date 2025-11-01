@@ -268,7 +268,7 @@ def map_status(raw_status) -> str:
        "A": "Absent", "A1": "Absent",
        "WO": "Holiday", "H": "Holiday", 
        "CL": "On Leave", "PL": "On Leave", "SL": "On Leave", "EL": "On Leave", "RL": "On Leave", "LWP": "On Leave", "SDL": "On Leave", "QL": "On Leave", "TU": "On Leave", "CO": "On Leave", "TR": "On Leave", "OH": "On Leave", "ML": "On Leave", "CH": "On Leave", "SCL": "On Leave", "SPL": "On Leave",
-       "MIS": "Half Day",  "HD": "Half Day", "HALF": "Half Day", "HLD": "Half Day",
+       "MIS": "Half Day",  "HD": "Half Day", "HALF": "Half Day", "HLD": "Half Day", "0.5P":"Half Day",
        "WOH": "Work From Home","WFH": "Work From Home"
     }
     key = re.sub(r'[^A-Za-z0-9\.]', '', s).upper()
