@@ -29,7 +29,8 @@
    "fieldname": "over_time",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Over Time"
+   "label": "Over Time",
+   "precision": 2
   },
   {
    "fieldname": "shift",
