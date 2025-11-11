@@ -10,16 +10,21 @@ import pandas as pd
 # Helper function to parse overtime
 # -------------------------
 def parse_overtime(raw):
+    """
+    Convert overtime value to float with 2 decimal places.
+    Handles formats like:
+    - 4.30 (4 hrs 30 min) → stored as 4.30
+    - 4.5 (4.5 hrs) → stored as 4.50
+    - 4 → stored as 4.00
+    """
     if not raw:
         return 0.0
     try:
-        parts = str(raw).split(":")
-        h = int(parts[0]) if len(parts) > 0 else 0
-        m = int(parts[1]) if len(parts) > 1 else 0
-        # Format as H.MM (e.g., 4.53)
-        return float(f"{h}.{m}")
-    except Exception:
-        return 00.33
+        # Convert to float and round to 2 decimal places
+        return round(float(raw), 2)
+    except (ValueError, TypeError):
+        # If conversion fails, return 0.0
+        return 0.0
 
 
 class OverTimeImport(Document):
