@@ -348,10 +348,10 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
 
            status_mapped = map_status(st_val)
 
-           # skip holidays
-           if status_mapped == "Holiday":
-               print(f"[DEBUG] Skipping {gp_no} {emp_name} on {date_str} (Holiday)")
-               continue
+            # skip holidays
+        #    if status_mapped == "Holiday":
+        #        print(f"[DEBUG] Skipping {gp_no} {emp_name} on {date_str} (Holiday)")
+        #        continue
 
            rec = {
                "Attendance Date": date_str,
