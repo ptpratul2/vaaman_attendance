@@ -194,10 +194,10 @@ def map_status(raw_status) -> str:
    mapping = {
        "P": "Present", "POW": "Present", "POH": "Present", "PWH": "Present",
        "A": "Absent", "A1": "Absent",
-       "WO": "Holiday", "H": "Holiday", 
+       "WO": "Holiday", "H": "Holiday",  "HLD": "Holiday", "WOH": "Holiday",
        "CL": "On Leave", "PL": "On Leave", "SL": "On Leave", "EL": "On Leave", "RL": "On Leave", "LWP": "On Leave", "SDL": "On Leave", "QL": "On Leave", "TU": "On Leave", "CO": "On Leave", "TR": "On Leave", "OH": "On Leave", "ML": "On Leave", "CH": "On Leave", "SCL": "On Leave", "SPL": "On Leave",
-       "MIS": "Half Day",  "HD": "Half Day", "HALF": "Half Day", "HLD": "Half Day",
-       "WOH": "Work From Home","WFH": "Work From Home"
+       "MIS": "Half Day",  "HD": "Half Day", "HALF": "Half Day",
+       "WFH": "Work From Home"
    }
    return mapping.get(s, s)
 
