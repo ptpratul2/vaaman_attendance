@@ -2,8 +2,6 @@
 from __future__ import unicode_literals
 import frappe
 
-frappe.msgprint(">>> overtime_mismatch.py loaded fresh <<<")
-
 
 def _to_float(v):
    try:
@@ -13,7 +11,7 @@ def _to_float(v):
 
 
 def execute(filters=None):
-   frappe.clear_cache()
+    frappe.clear_cache()
    columns = [
        {"fieldname": "branch", "label": "Branch", "fieldtype": "Data"},
        {"fieldname": "employee", "label": "Employee", "fieldtype": "Data"},

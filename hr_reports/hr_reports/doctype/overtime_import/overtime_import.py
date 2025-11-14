@@ -29,12 +29,8 @@ def parse_overtime(raw):
 
 class OverTimeImport(Document):
     def validate(self):
-        frappe.msgprint(">>> validate() called for OverTimeImport")
-        print(">>> validate() called for OverTimeImport")
-
         if not self.attach_jppy:
             frappe.msgprint("No file attached")
-            print("No file attached")
             return
 
         # Step 1: Locate attached file
@@ -48,8 +44,6 @@ class OverTimeImport(Document):
             frappe.throw(f"File not found: {self.attach_jppy}")
 
         file_path = get_file_path(file_doc[0].file_url)
-        frappe.msgprint(f"Found file at: {file_path}")
-        print(f"Found file at: {file_path}")
 
         # Step 2: Read with pandas (csv/xls/xlsx)
         try:
@@ -64,13 +58,8 @@ class OverTimeImport(Document):
         df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
         df = df.where(pd.notnull(df), None)
 
-        frappe.msgprint(f"Columns: {list(df.columns)}")
-        print(f"Columns: {list(df.columns)}")
-
         # Step 3: Clear existing rows
         self.set("overtime_import_details", [])
-        frappe.msgprint("Cleared old child rows")
-        print("Cleared old child rows")
 
         # Step 4: Append rows
         for _, row in df.iterrows():
@@ -81,10 +70,6 @@ class OverTimeImport(Document):
                 "over_time": parse_overtime(raw_ot),  # <-- parsed here
                 "shift": row.get("shift"),
             }
-            frappe.msgprint(f"Appending row: {row_data}")
-            print(f"Appending row: {row_data}")
-
             self.append("overtime_import_details", row_data)
 
         frappe.msgprint(f"Successfully imported {len(df)} rows")
-        print(f"Successfully imported {len(df)} rows")
