@@ -180,28 +180,36 @@ def cancel_uploaded_file(doc, method):
         attendances = frappe.get_all(
             "Attendance",
             filters={"custom_crystal_upload_ref": doc.name},
-            pluck="name"
+            fields=["name", "docstatus"]
         )
         for att in attendances:
             try:
-                att_doc = frappe.get_doc("Attendance", att)
-                att_doc.cancel() if att_doc.docstatus == 1 else att_doc.delete()
-                append_log(doc, f"Removed Attendance {att}")
+                att_doc = frappe.get_doc("Attendance", att.name)
+                # Cancel if submitted, then delete
+                if att_doc.docstatus == 1:
+                    att_doc.cancel()
+                # Delete the attendance (works for draft=0 or cancelled=2)
+                frappe.delete_doc("Attendance", att.name, force=1, ignore_permissions=True)
+                append_log(doc, f"Removed Attendance {att.name}")
             except Exception as e:
-                append_log(doc, f"❌ Failed to remove Attendance {att}: {str(e)}")
+                append_log(doc, f"❌ Failed to remove Attendance {att.name}: {str(e)}")
 
+        frappe.db.commit()
+    
         # 2. Delete Data Import if exists
         data_imports = frappe.get_all(
             "Data Import",
-            filters={"import_file": ["like", f"%cleaned_{doc.name}%"]},
+            filters={"custom_crystal_upload_ref": doc.name},
             pluck="name"
         )
         for di in data_imports:
             try:
-                frappe.delete_doc("Data Import", di, force=1)
+                frappe.delete_doc("Data Import", di, force=1, ignore_permissions=True)
                 append_log(doc, f"Removed Data Import {di}")
             except Exception as e:
                 append_log(doc, f"❌ Failed to remove Data Import {di}: {str(e)}")
+
+        frappe.db.commit()
 
         # 3. Optionally remove cleaned report file
         cleaned_dir = frappe.get_site_path("private", "files", "cleaned_reports")
