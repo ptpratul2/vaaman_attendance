@@ -62,11 +62,20 @@ def _to_float_workhrs(time_str):
 
 
 def _calculate_overtime(work_hrs_str, shift):
-    """Overtime calculation as per logic"""
-    default_shift_hrs = {"A": 8, "B": 8, "C": 8, "G": 7}
+    """
+    Overtime calculation as per logic:
+    - All shifts considered as 9 hours
+    - OT = Working Hours - 9
+    - If OT is negative or less than 1 hour, return empty string (blank cell)
+    """
     work_float = _to_float_workhrs(work_hrs_str)
-    shift_hrs = default_shift_hrs.get(str(shift).upper(), 0)
-    overtime = round(work_float - shift_hrs - 0.60, 2)
+    shift_hrs = 9  # All shifts are 9 hours
+    overtime = round(work_float - shift_hrs, 2)
+
+    # If OT is negative or less than 1 hour, return blank
+    if overtime < 1:
+        return ""
+
     return overtime
 
 
@@ -82,14 +91,47 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    # Load file
-    df_raw = pd.read_excel(input_path, engine="openpyxl")
+    # Load file - skip header rows (row 0 is title, row 1 is actual headers)
+    # Try reading with header on different rows to find the correct one
+    df_raw = None
+    print("[clean_daily_inout14] Searching for header row...")
+    for skip_rows in range(10):  # Try first 10 rows (0-9)
+        try:
+            temp_df = pd.read_excel(input_path, engine="openpyxl", header=skip_rows)
+            # Check if this row has the columns we need
+            print(f"  Row {skip_rows}: {list(temp_df.columns[:3])}...")  # Show first 3 columns
+            if "GP No" in temp_df.columns:
+                df_raw = temp_df
+                print(f"[clean_daily_inout14] ✓ Found header row at position {skip_rows}")
+                break
+        except Exception as e:
+            print(f"  Row {skip_rows}: Error - {str(e)[:50]}")
+            continue
+
+    if df_raw is None:
+        print("[clean_daily_inout14] WARNING: Could not find header row with 'GP No', using default")
+        df_raw = pd.read_excel(input_path, engine="openpyxl")
+
     print(f"[clean_daily_inout14] Loaded raw DataFrame shape: {df_raw.shape}")
+
+    # DEBUG: Print all detected columns
+    print("\n" + "=" * 80)
+    print("[DEBUG] DETECTED COLUMNS FROM EXCEL:")
+    print("=" * 80)
+    for idx, col in enumerate(df_raw.columns, 1):
+        print(f"{idx}. '{col}' (type: {type(col).__name__}, repr: {repr(col)})")
+    print("=" * 80 + "\n")
 
     # Required cols
     required_cols = ["GP No", "Name", "Date In", "Time In", "Time Out", "Working Hours", "Came In Shift"]
     missing = [c for c in required_cols if c not in df_raw.columns]
     if missing:
+        print("\n[DEBUG] REQUIRED COLUMNS:")
+        for idx, col in enumerate(required_cols, 1):
+            print(f"{idx}. '{col}' (repr: {repr(col)})")
+        print("\n[DEBUG] MISSING COLUMNS:")
+        for col in missing:
+            print(f"  - '{col}'")
         raise ValueError(f"Missing required columns in input: {missing}")
 
     records = []
@@ -101,6 +143,10 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
         time_out = row.get("Time Out")
         work_hrs = str(row.get("Working Hours")).strip() if pd.notna(row.get("Working Hours")) else None
         shift = str(row.get("Came In Shift")).strip() if pd.notna(row.get("Came In Shift")) else None
+
+        # Convert "O" shift to "A" shift
+        if shift and shift.upper() == "O":
+            shift = "A"
 
         # Map GP No → Employee
         employee_id = None
