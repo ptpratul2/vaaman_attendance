@@ -79,6 +79,131 @@ def _calculate_overtime(work_hrs_str, shift):
     return overtime
 
 
+def parse_time_to_datetime(date_str, time_str):
+    """Parse date and time string to datetime object"""
+    try:
+        # Parse date: YYYY-MM-DD
+        date_obj = pd.to_datetime(date_str).date()
+
+        # Parse time: dd-mm-YYYY hh:mm:ss AM/PM
+        if pd.isna(time_str) or not time_str:
+            return None
+
+        time_parts = str(time_str).split()
+        if len(time_parts) < 2:
+            return None
+
+        # Get time part and AM/PM
+        time_part = time_parts[-2]  # hh:mm:ss
+        am_pm = time_parts[-1]       # AM/PM
+
+        # Parse time
+        h, m, s = map(int, time_part.split(':'))
+
+        # Convert to 24-hour format
+        if am_pm.upper() == 'PM' and h != 12:
+            h += 12
+        elif am_pm.upper() == 'AM' and h == 12:
+            h = 0
+
+        return datetime.combine(date_obj, datetime.min.time().replace(hour=h, minute=m, second=s))
+    except Exception:
+        return None
+
+
+def times_overlap(start1, end1, start2, end2):
+    """Check if two time ranges overlap"""
+    if not all([start1, end1, start2, end2]):
+        return False
+    return start1 < end2 and start2 < end1
+
+
+def merge_overlapping_attendances(df):
+    """
+    Merge attendance records for same employee on same date.
+    Simple approach: Find duplicates, merge only those, keep rest as-is.
+    """
+    if df.empty:
+        return df
+
+    print(f"[clean_daily_inout14] Merge: Processing {len(df)} records...")
+
+    # Step 1: Find duplicates - much faster!
+    df['_is_duplicate'] = df.duplicated(subset=['Employee', 'Attendance Date'], keep=False)
+
+    duplicates = df[df['_is_duplicate'] == True].copy()
+    non_duplicates = df[df['_is_duplicate'] == False].copy()
+
+    print(f"[clean_daily_inout14] Merge: Found {len(duplicates)} duplicate records, {len(non_duplicates)} unique records")
+
+    # If no duplicates, return as-is
+    if duplicates.empty:
+        print(f"[clean_daily_inout14] Merge: No duplicates found, skipping merge")
+        return non_duplicates.drop(columns=['_is_duplicate'])
+
+    # Step 2: Only process duplicates
+    print(f"[clean_daily_inout14] Merge: Processing only the {len(duplicates)} duplicate records...")
+
+    # Parse datetimes only for duplicates
+    duplicates['_in_dt'] = duplicates.apply(lambda r: parse_time_to_datetime(r['Attendance Date'], r['In Time']), axis=1)
+    duplicates['_out_dt'] = duplicates.apply(lambda r: parse_time_to_datetime(r['Attendance Date'], r['Out Time']), axis=1)
+    duplicates['_work_float'] = duplicates['Working Hours'].apply(_to_float_workhrs)
+
+    # Step 3: Merge duplicates
+    merged_list = []
+
+    for (emp, date), group in duplicates.groupby(['Employee', 'Attendance Date']):
+        # Get earliest In Time
+        earliest_in = group.iloc[0]['In Time']
+        if group['_in_dt'].notna().any():
+            earliest_idx = group['_in_dt'].idxmin()
+            earliest_in = group.loc[earliest_idx, 'In Time']
+
+        # Get latest Out Time
+        latest_out = group.iloc[0]['Out Time']
+        if group['_out_dt'].notna().any():
+            latest_idx = group['_out_dt'].idxmax()
+            latest_out = group.loc[latest_idx, 'Out Time']
+
+        # Sum working hours
+        total_work_float = group['_work_float'].sum()
+        hours = int(total_work_float)
+        minutes = int((total_work_float - hours) * 60)
+        seconds = int(((total_work_float - hours) * 60 - minutes) * 60)
+        work_hrs_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        # Calculate overtime
+        shift = group.iloc[0]['Shift']
+        ot = _calculate_overtime(work_hrs_str, shift)
+
+        # Create merged record
+        merged = {
+            'Employee': emp,
+            'Attendance Date': date,
+            'Employee Name': group.iloc[0]['Employee Name'],
+            'Status': group.iloc[0]['Status'],
+            'In Time': earliest_in,
+            'Out Time': latest_out,
+            'Company': group.iloc[0]['Company'],
+            'Branch': group.iloc[0]['Branch'],
+            'Working Hours': work_hrs_str,
+            'Shift': shift,
+            'Over Time': ot
+        }
+        merged_list.append(merged)
+        print(f"[clean_daily_inout14] Merged {len(group)} records for {emp} on {date}")
+
+    # Step 4: Combine non-duplicates with merged duplicates
+    merged_df = pd.DataFrame(merged_list)
+    non_duplicates = non_duplicates.drop(columns=['_is_duplicate'])
+
+    result = pd.concat([non_duplicates, merged_df], ignore_index=True)
+
+    print(f"[clean_daily_inout14] Merge: Completed. Final count: {len(result)} records")
+
+    return result
+
+
 def clean_daily_inout14(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
     print("=" * 80)
     print("[clean_daily_inout14] Starting")
@@ -135,7 +260,8 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
         raise ValueError(f"Missing required columns in input: {missing}")
 
     records = []
-    for _, row in df_raw.iterrows():
+    failed_gp_count = 0
+    for idx, row in df_raw.iterrows():
         gp_no = str(row.get("GP No")).strip() if pd.notna(row.get("GP No")) else None
         emp_name = str(row.get("Name")).strip() if pd.notna(row.get("Name")) else None
         att_date = row.get("Date In")
@@ -154,8 +280,10 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
             try:
                 emp_doc = frappe.get_doc("Employee", {"attendance_device_id": gp_no})
                 employee_id = emp_doc.name
-            except Exception:
-                print(f"[clean_daily_inout14] WARNING: Employee not found for GP No {gp_no}")
+            except Exception as e:
+                failed_gp_count += 1
+                if failed_gp_count <= 5:  # Only print first 5
+                    print(f"[clean_daily_inout14] WARNING: Employee not found for GP No '{gp_no}' (Name: {emp_name}) - Error: {str(e)[:100]}")
 
         # Status logic
         status = "Absent"
@@ -186,9 +314,31 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
 
     df_final = pd.DataFrame.from_records(records)
 
+    print(f"[clean_daily_inout14] Built DataFrame with {len(df_final)} rows (before dropping invalid)")
+    if failed_gp_count > 0:
+        print(f"[clean_daily_inout14] Total GP Numbers not found: {failed_gp_count}")
+
+    # Debug: Check Employee column before drop
+    empty_employees = df_final[df_final['Employee'].isna() | (df_final['Employee'] == '')]
+    if not empty_employees.empty:
+        print(f"[clean_daily_inout14] WARNING: Found {len(empty_employees)} rows with missing Employee ID")
+
     # Drop invalid
     df_final = df_final.dropna(subset=["Attendance Date", "Employee"], how="any")
-    print(f"[clean_daily_inout14] Built final DataFrame with {len(df_final)} rows")
+    df_final = df_final[df_final['Employee'] != '']  # Also remove empty strings
+    print(f"[clean_daily_inout14] After dropping invalid: {len(df_final)} rows (before merging)")
+
+    # Merge overlapping attendances
+    if not df_final.empty:
+        print(f"[clean_daily_inout14] Starting merge process...")
+        try:
+            df_final = merge_overlapping_attendances(df_final)
+            print(f"[clean_daily_inout14] After merging overlaps: {len(df_final)} rows")
+        except Exception as e:
+            print(f"[clean_daily_inout14] ERROR in merge function: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            print(f"[clean_daily_inout14] Continuing without merge...")
 
     if df_final.empty:
         raise ValueError("No attendance records parsed from Daily In-Out report.")
