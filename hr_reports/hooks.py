@@ -200,10 +200,12 @@ fixtures = [
 
 # Overriding Methods
 # ------------------------------
-#
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "hr_reports.event.get_events"
-# }
+override_whitelisted_methods = {
+	"frappe.desk.doctype.bulk_update.bulk_update.submit_cancel_or_update_docs": "hr_reports.utils.bulk_operations_override.submit_cancel_or_update_docs",
+	"frappe.desk.reportview.delete_items": "hr_reports.utils.bulk_operations_override.delete_items",
+	"frappe.model.workflow.bulk_workflow_approval": "hr_reports.utils.bulk_operations_override.bulk_workflow_approval",
+	"frappe.desk.doctype.bulk_update.bulk_update.bulk_update": "hr_reports.utils.bulk_operations_override.bulk_update"
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
