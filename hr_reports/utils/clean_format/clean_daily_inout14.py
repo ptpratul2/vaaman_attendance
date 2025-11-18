@@ -48,10 +48,14 @@ def format_datetime(date_val, time_val):
 
 
 def _to_float_workhrs(time_str):
-    """Convert 'HH:MM:SS' → float hours e.g. '08:53:09' → 8.53"""
+    """Convert 'HH:MM:SS' → float hours e.g. '08:53:09' → 8.89"""
     if not time_str or str(time_str).lower() in ["nan", "none"]:
         return 0.0
     try:
+        # Handle if already a number
+        if isinstance(time_str, (int, float)):
+            return float(time_str)
+        
         parts = str(time_str).split(":")
         h = int(parts[0])
         m = int(parts[1]) if len(parts) > 1 else 0
@@ -77,6 +81,72 @@ def _calculate_overtime(work_hrs_str, shift):
         return ""
 
     return overtime
+
+
+def _seconds_to_workhrs(total_seconds: float) -> str:
+    """Convert seconds → HH:MM:SS"""
+    if not total_seconds or total_seconds <= 0:
+        return "00:00:00"
+    total_seconds = int(total_seconds)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _seconds_to_decimal_hours(total_seconds: float) -> float:
+    """Convert seconds → decimal hours (float) for Frappe working_hours field"""
+    if not total_seconds or total_seconds <= 0:
+        return 0.0
+    # Round to 2 decimal places (e.g., 8.5 for 8 hours 30 minutes)
+    return round(total_seconds / 3600, 2)
+
+
+def _calculate_overtime_from_seconds(total_seconds: float, shift_hours: int = 9):
+    """Overtime calculation based on total seconds worked."""
+    if not total_seconds or total_seconds <= 0:
+        return ""
+    work_float = round(total_seconds / 3600, 2)
+    overtime = round(work_float - shift_hours, 2)
+    if overtime < 1:
+        return ""
+    return overtime
+
+
+def _format_output_datetime(dt_obj: datetime) -> str:
+    """Return dd-mm-YYYY hh:mm:ss AM/PM format from datetime"""
+    if not dt_obj:
+        return ""
+    return dt_obj.strftime("%d-%m-%Y %I:%M:%S %p")
+
+
+def _merge_intervals(intervals):
+    """Merge overlapping/touching datetime intervals."""
+    intervals = [(start, end) for start, end in intervals if start and end]
+    if not intervals:
+        return []
+
+    intervals.sort(key=lambda x: x[0])
+    merged = [list(intervals[0])]
+
+    for start, end in intervals[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1][1] = max(last_end, end)
+        else:
+            merged.append([start, end])
+    return merged
+
+
+def _first_non_empty(series: pd.Series) -> str:
+    """Return first non-empty/non-null string value from a Series."""
+    for value in series:
+        if pd.isna(value):
+            continue
+        value_str = str(value).strip()
+        if value_str:
+            return value_str
+    return ""
 
 
 def parse_time_to_datetime(date_str, time_str):
@@ -120,88 +190,106 @@ def times_overlap(start1, end1, start2, end2):
 
 def merge_overlapping_attendances(df):
     """
-    Merge attendance records for same employee on same date.
-    Simple approach: Find duplicates, merge only those, keep rest as-is.
+    Merge all punches for each Employee+Attendance Date pair.
+    - Assign one shift per day
+    - Calculate working hours as sum of actual time between each in/out pair
+    - Support overnight shifts
+    - Calculate OT after 9 hours
     """
     if df.empty:
         return df
 
-    print(f"[clean_daily_inout14] Merge: Processing {len(df)} records...")
+    working_df = df.copy()
 
-    # Step 1: Find duplicates - much faster!
-    df['_is_duplicate'] = df.duplicated(subset=['Employee', 'Attendance Date'], keep=False)
+    print(f"[clean_daily_inout14] Merge: Processing {len(working_df)} records...")
 
-    duplicates = df[df['_is_duplicate'] == True].copy()
-    non_duplicates = df[df['_is_duplicate'] == False].copy()
+    working_df['_in_dt'] = working_df.apply(
+        lambda r: parse_time_to_datetime(r['Attendance Date'], r['In Time']),
+        axis=1
+    )
+    working_df['_out_dt'] = working_df.apply(
+        lambda r: parse_time_to_datetime(r['Attendance Date'], r['Out Time']),
+        axis=1
+    )
 
-    print(f"[clean_daily_inout14] Merge: Found {len(duplicates)} duplicate records, {len(non_duplicates)} unique records")
+    # Overnight support: if Out <= In, push Out to next day
+    overnight_mask = (
+        working_df['_in_dt'].notna() &
+        working_df['_out_dt'].notna() &
+        (working_df['_out_dt'] <= working_df['_in_dt'])
+    )
+    working_df.loc[overnight_mask, '_out_dt'] += timedelta(days=1)
 
-    # If no duplicates, return as-is
-    if duplicates.empty:
-        print(f"[clean_daily_inout14] Merge: No duplicates found, skipping merge")
-        return non_duplicates.drop(columns=['_is_duplicate'])
+    merged_rows = []
 
-    # Step 2: Only process duplicates
-    print(f"[clean_daily_inout14] Merge: Processing only the {len(duplicates)} duplicate records...")
+    for (emp, date), group in working_df.groupby(['Employee', 'Attendance Date']):
+        if not emp or not date:
+            continue
 
-    # Parse datetimes only for duplicates
-    duplicates['_in_dt'] = duplicates.apply(lambda r: parse_time_to_datetime(r['Attendance Date'], r['In Time']), axis=1)
-    duplicates['_out_dt'] = duplicates.apply(lambda r: parse_time_to_datetime(r['Attendance Date'], r['Out Time']), axis=1)
-    duplicates['_work_float'] = duplicates['Working Hours'].apply(_to_float_workhrs)
+        # Calculate working hours from actual time between each in/out pair
+        # Sum all individual punch durations
+        total_seconds = 0.0
+        valid_pairs = []
+        
+        for idx, row in group.iterrows():
+            in_dt = row['_in_dt']
+            out_dt = row['_out_dt']
+            
+            # Only count pairs where both in and out are valid
+            if pd.notna(in_dt) and pd.notna(out_dt):
+                if out_dt > in_dt:  # Ensure out is after in
+                    duration = (out_dt - in_dt).total_seconds()
+                    if duration > 0:
+                        total_seconds += duration
+                        valid_pairs.append((in_dt, out_dt))
+        
+        # Get earliest in and latest out for display
+        earliest_in_series = group['_in_dt'].dropna()
+        latest_out_series = group['_out_dt'].dropna()
 
-    # Step 3: Merge duplicates
-    merged_list = []
+        earliest_in = earliest_in_series.min() if not earliest_in_series.empty else None
+        latest_out = latest_out_series.max() if not latest_out_series.empty else None
 
-    for (emp, date), group in duplicates.groupby(['Employee', 'Attendance Date']):
-        # Get earliest In Time
-        earliest_in = group.iloc[0]['In Time']
-        if group['_in_dt'].notna().any():
-            earliest_idx = group['_in_dt'].idxmin()
-            earliest_in = group.loc[earliest_idx, 'In Time']
+        if earliest_in is not None and pd.isna(earliest_in):
+            earliest_in = None
+        if latest_out is not None and pd.isna(latest_out):
+            latest_out = None
 
-        # Get latest Out Time
-        latest_out = group.iloc[0]['Out Time']
-        if group['_out_dt'].notna().any():
-            latest_idx = group['_out_dt'].idxmax()
-            latest_out = group.loc[latest_idx, 'Out Time']
+        # If no valid pairs but we have earliest/latest, use that as fallback
+        if total_seconds <= 0 and earliest_in and latest_out:
+            if latest_out > earliest_in:
+                total_seconds = (latest_out - earliest_in).total_seconds()
 
-        # Sum working hours
-        total_work_float = group['_work_float'].sum()
-        hours = int(total_work_float)
-        minutes = int((total_work_float - hours) * 60)
-        seconds = int(((total_work_float - hours) * 60 - minutes) * 60)
-        work_hrs_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        shift_series = group['Shift'].replace("", pd.NA).dropna()
+        shift = shift_series.iloc[0] if not shift_series.empty else ""
 
-        # Calculate overtime
-        shift = group.iloc[0]['Shift']
-        ot = _calculate_overtime(work_hrs_str, shift)
+        # Convert to both formats: string for display, float for Frappe
+        work_hrs_str = _seconds_to_workhrs(total_seconds)
+        work_hrs_decimal = _seconds_to_decimal_hours(total_seconds)  # Decimal hours for Frappe
+        overtime = _calculate_overtime_from_seconds(total_seconds)
 
-        # Create merged record
-        merged = {
+        status = "Present" if total_seconds and total_seconds > 0 else group.iloc[0]['Status']
+
+        merged_row = {
             'Employee': emp,
             'Attendance Date': date,
             'Employee Name': group.iloc[0]['Employee Name'],
-            'Status': group.iloc[0]['Status'],
-            'In Time': earliest_in,
-            'Out Time': latest_out,
+            'Status': status,
+            'In Time': _format_output_datetime(earliest_in) or _first_non_empty(group['In Time']),
+            'Out Time': _format_output_datetime(latest_out) or _first_non_empty(group['Out Time']),
             'Company': group.iloc[0]['Company'],
             'Branch': group.iloc[0]['Branch'],
-            'Working Hours': work_hrs_str,
+            'Working Hours': work_hrs_decimal,  # Use decimal hours for Frappe
             'Shift': shift,
-            'Over Time': ot
+            'Over Time': overtime
         }
-        merged_list.append(merged)
-        print(f"[clean_daily_inout14] Merged {len(group)} records for {emp} on {date}")
+        merged_rows.append(merged_row)
+        print(f"[clean_daily_inout14] Merged {len(group)} punches for {emp} on {date} - Total working hours: {work_hrs_decimal} hours ({work_hrs_str}) (from {len(valid_pairs)} valid in/out pairs)")
 
-    # Step 4: Combine non-duplicates with merged duplicates
-    merged_df = pd.DataFrame(merged_list)
-    non_duplicates = non_duplicates.drop(columns=['_is_duplicate'])
+    merged_df = pd.DataFrame(merged_rows)
+    print(f"[clean_daily_inout14] Merge: Completed. Final count: {len(merged_df)} records")
 
-    result = pd.concat([non_duplicates, merged_df], ignore_index=True)
-
-    print(f"[clean_daily_inout14] Merge: Completed. Final count: {len(result)} records")
-
-    return result
+    return merged_df
 
 
 def clean_daily_inout14(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
@@ -294,8 +382,33 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
         in_time_fmt = format_datetime(att_date, time_in) or format_datetime(att_date, "09:00:00")
         out_time_fmt = format_datetime(att_date, time_out) or format_datetime(att_date, "17:00:00")
 
-        # Overtime calculation
-        overtime_val = _calculate_overtime(work_hrs, shift)
+        # Calculate working hours from in/out times if available, otherwise use Excel value
+        work_hrs_decimal = 0.0
+        if time_in and time_out and pd.notna(time_in) and pd.notna(time_out):
+            try:
+                # Try to calculate from in/out times
+                in_dt = parse_time_to_datetime(
+                    pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
+                    in_time_fmt
+                )
+                out_dt = parse_time_to_datetime(
+                    pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
+                    out_time_fmt
+                )
+                if in_dt and out_dt:
+                    if out_dt <= in_dt:
+                        out_dt += timedelta(days=1)  # Handle overnight
+                    total_seconds = (out_dt - in_dt).total_seconds()
+                    work_hrs_decimal = _seconds_to_decimal_hours(total_seconds)
+            except Exception:
+                # Fallback to Excel value
+                work_hrs_decimal = _to_float_workhrs(work_hrs)
+        else:
+            # Use Excel value converted to decimal
+            work_hrs_decimal = _to_float_workhrs(work_hrs)
+
+        # Overtime calculation (using decimal hours)
+        overtime_val = _calculate_overtime_from_seconds(work_hrs_decimal * 3600) if work_hrs_decimal > 0 else ""
 
         rec = {
             "Attendance Date": pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
@@ -306,7 +419,7 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
             "Out Time": out_time_fmt,
             "Company": company if company else "",
             "Branch": branch if branch else "",
-            "Working Hours": work_hrs,
+            "Working Hours": work_hrs_decimal,  # Use decimal hours for Frappe
             "Shift": shift if shift else "",
             "Over Time": overtime_val
         }

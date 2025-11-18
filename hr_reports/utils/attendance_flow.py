@@ -49,7 +49,7 @@ def process_uploaded_file(doc, method):
                 company=doc.company,
                 branch=doc.branch
             )
-            append_log(doc, "Step 2: Used clean_daily_inout14 for Vedanta Plant II")
+            append_log(doc, "Step 2: Used clean_daily_inout14 (multi-punch merge) for Vedanta Plant II")
 
         elif doc.branch == "Vedanta Lanjigarh":
             clean_daily_inout24(
@@ -174,58 +174,259 @@ def process_uploaded_file(doc, method):
 def cancel_uploaded_file(doc, method):
     """Triggered when Crystal Attendance Upload is cancelled"""
     try:
-        append_log(doc, "Cancel triggered → rolling back imported attendance")
+        # Debug: Log that function was called
+        frappe.logger().info(f"[CANCEL HOOK] cancel_uploaded_file called for {doc.name} (docstatus: {doc.docstatus})")
+        append_log(doc, f"Cancel triggered → rolling back imported attendance for {doc.name}")
+        
+        deleted_count = 0
+        failed_count = 0
 
-        # 1. Delete Attendance linked to this upload
-        attendances = frappe.get_all(
-            "Attendance",
-            filters={"custom_crystal_upload_ref": doc.name},
-            fields=["name", "docstatus"]
-        )
-        for att in attendances:
+        # 1. Get total count first
+        total_count = frappe.db.count("Attendance", {"custom_crystal_upload_ref": doc.name})
+        append_log(doc, f"Found {total_count} Attendance records to delete")
+        
+        if total_count == 0:
+            append_log(doc, "No Attendance records found with this upload reference")
+        elif total_count > 5000:
+            # For very large datasets, use bulk SQL deletion for better performance
+            append_log(doc, f"Large dataset detected ({total_count} records). Using bulk SQL deletion for efficiency...")
             try:
-                att_doc = frappe.get_doc("Attendance", att.name)
-                # Cancel if submitted, then delete
-                if att_doc.docstatus == 1:
-                    att_doc.cancel()
-                # Delete the attendance (works for draft=0 or cancelled=2)
-                frappe.delete_doc("Attendance", att.name, force=1, ignore_permissions=True)
-                append_log(doc, f"Removed Attendance {att.name}")
-            except Exception as e:
-                append_log(doc, f"❌ Failed to remove Attendance {att.name}: {str(e)}")
+                # First, try to cancel submitted records in batches
+                submitted_count = frappe.db.count("Attendance", {
+                    "custom_crystal_upload_ref": doc.name,
+                    "docstatus": 1
+                })
+                
+                if submitted_count > 0:
+                    append_log(doc, f"Cancelling {submitted_count} submitted records...")
+                    # Get submitted records in batches and cancel them
+                    cancel_batch_size = 500
+                    cancel_start = 0
+                    while cancel_start < submitted_count:
+                        submitted_att = frappe.get_all(
+                            "Attendance",
+                            filters={
+                                "custom_crystal_upload_ref": doc.name,
+                                "docstatus": 1
+                            },
+                            fields=["name"],
+                            limit_start=cancel_start,
+                            limit_page_length=cancel_batch_size
+                        )
+                        if not submitted_att:
+                            break
+                        for att in submitted_att:
+                            try:
+                                att_doc = frappe.get_doc("Attendance", att.name)
+                                att_doc.cancel()
+                                frappe.db.commit()
+                            except:
+                                frappe.db.rollback()
+                        cancel_start += cancel_batch_size
+                
+                # Bulk delete using SQL
+                result = frappe.db.sql("""
+                    DELETE FROM `tabAttendance` 
+                    WHERE custom_crystal_upload_ref = %s
+                """, (doc.name,), as_dict=False)
+                frappe.db.commit()
+                deleted_count = total_count
+                append_log(doc, f"✅ Bulk deleted {deleted_count} Attendance records via SQL")
+            except Exception as bulk_err:
+                append_log(doc, f"⚠️ Bulk deletion failed, falling back to individual deletion: {str(bulk_err)[:200]}")
+                # Fall through to individual deletion
+                total_count = frappe.db.count("Attendance", {"custom_crystal_upload_ref": doc.name})
+                if total_count > 0:
+                    # Process in batches using pagination
+                    batch_size = 1000
+                    start = 0
+                    
+                    while start < total_count:
+                        # Get batch of attendance records
+                        attendances = frappe.get_all(
+                            "Attendance",
+                            filters={"custom_crystal_upload_ref": doc.name},
+                            fields=["name", "docstatus"],
+                            limit_start=start,
+                            limit_page_length=batch_size,
+                            order_by="name"
+                        )
+                        
+                        if not attendances:
+                            break
+                        
+                        append_log(doc, f"Processing batch: {start + 1} to {min(start + batch_size, total_count)} of {total_count}")
+                        
+                        for att in attendances:
+                            try:
+                                # Check if document still exists
+                                if not frappe.db.exists("Attendance", att.name):
+                                    continue
+                                
+                                att_doc = frappe.get_doc("Attendance", att.name)
+                                
+                                # Cancel if submitted
+                                if att_doc.docstatus == 1:
+                                    try:
+                                        att_doc.cancel()
+                                        frappe.db.commit()
+                                    except Exception as cancel_err:
+                                        append_log(doc, f"⚠️ Could not cancel {att.name}: {str(cancel_err)[:200]}")
+                                        # Continue to try deletion anyway
+                                
+                                # Delete the attendance
+                                frappe.delete_doc("Attendance", att.name, force=1, ignore_permissions=True)
+                                frappe.db.commit()
+                                deleted_count += 1
+                                
+                                if deleted_count % 100 == 0:  # Log progress every 100 records
+                                    append_log(doc, f"Progress: Deleted {deleted_count}/{total_count} attendances...")
+                                    
+                            except frappe.DoesNotExistError:
+                                # Already deleted, skip
+                                continue
+                            except Exception as e:
+                                failed_count += 1
+                                error_msg = str(e)[:200]
+                                
+                                # Try SQL-based deletion as fallback
+                                try:
+                                    frappe.db.sql("""
+                                        DELETE FROM `tabAttendance` 
+                                        WHERE name = %s
+                                    """, (att.name,))
+                                    frappe.db.commit()
+                                    deleted_count += 1
+                                    failed_count -= 1
+                                except Exception as sql_err:
+                                    # Log but continue
+                                    if failed_count <= 10:  # Only log first 10 failures to avoid spam
+                                        append_log(doc, f"❌ Failed to remove {att.name}: {str(sql_err)[:200]}")
+                                    frappe.db.rollback()
+                                continue
+                        
+                        start += batch_size
+                        # Small delay to avoid overwhelming the system
+                        frappe.db.commit()
 
-        frappe.db.commit()
+                    append_log(doc, f"✅ Deleted {deleted_count} Attendance records (Failed: {failed_count} out of {total_count} total)")
+        else:
+            # For smaller datasets (< 5000), use individual deletion with pagination
+            batch_size = 1000
+            start = 0
+            
+            while start < total_count:
+                # Get batch of attendance records
+                attendances = frappe.get_all(
+                    "Attendance",
+                    filters={"custom_crystal_upload_ref": doc.name},
+                    fields=["name", "docstatus"],
+                    limit_start=start,
+                    limit_page_length=batch_size,
+                    order_by="name"
+                )
+                
+                if not attendances:
+                    break
+                
+                append_log(doc, f"Processing batch: {start + 1} to {min(start + batch_size, total_count)} of {total_count}")
+                
+                for att in attendances:
+                    try:
+                        # Check if document still exists
+                        if not frappe.db.exists("Attendance", att.name):
+                            continue
+                        
+                        att_doc = frappe.get_doc("Attendance", att.name)
+                        
+                        # Cancel if submitted
+                        if att_doc.docstatus == 1:
+                            try:
+                                att_doc.cancel()
+                                frappe.db.commit()
+                            except Exception as cancel_err:
+                                append_log(doc, f"⚠️ Could not cancel {att.name}: {str(cancel_err)[:200]}")
+                                # Continue to try deletion anyway
+                        
+                        # Delete the attendance
+                        frappe.delete_doc("Attendance", att.name, force=1, ignore_permissions=True)
+                        frappe.db.commit()
+                        deleted_count += 1
+                        
+                        if deleted_count % 100 == 0:  # Log progress every 100 records
+                            append_log(doc, f"Progress: Deleted {deleted_count}/{total_count} attendances...")
+                            
+                    except frappe.DoesNotExistError:
+                        # Already deleted, skip
+                        continue
+                    except Exception as e:
+                        failed_count += 1
+                        error_msg = str(e)[:200]
+                        
+                        # Try SQL-based deletion as fallback
+                        try:
+                            frappe.db.sql("""
+                                DELETE FROM `tabAttendance` 
+                                WHERE name = %s
+                            """, (att.name,))
+                            frappe.db.commit()
+                            deleted_count += 1
+                            failed_count -= 1
+                        except Exception as sql_err:
+                            # Log but continue
+                            if failed_count <= 10:  # Only log first 10 failures to avoid spam
+                                append_log(doc, f"❌ Failed to remove {att.name}: {str(sql_err)[:200]}")
+                            frappe.db.rollback()
+                        continue
+                
+                start += batch_size
+                frappe.db.commit()
+
+            append_log(doc, f"✅ Deleted {deleted_count} Attendance records (Failed: {failed_count} out of {total_count} total)")
     
         # 2. Delete Data Import if exists
         data_imports = frappe.get_all(
             "Data Import",
             filters={"custom_crystal_upload_ref": doc.name},
-            pluck="name"
+            pluck="name",
+            limit_page_length=1000
         )
+        
+        append_log(doc, f"Found {len(data_imports)} Data Import records to delete")
+        
         for di in data_imports:
             try:
-                frappe.delete_doc("Data Import", di, force=1, ignore_permissions=True)
-                append_log(doc, f"Removed Data Import {di}")
+                if frappe.db.exists("Data Import", di):
+                    frappe.delete_doc("Data Import", di, force=1, ignore_permissions=True)
+                    frappe.db.commit()
+                    append_log(doc, f"Removed Data Import {di}")
             except Exception as e:
-                append_log(doc, f"❌ Failed to remove Data Import {di}: {str(e)}")
+                append_log(doc, f"❌ Failed to remove Data Import {di}: {str(e)[:200]}")
 
-        frappe.db.commit()
+        # 3. Remove cleaned report file
+        try:
+            cleaned_dir = frappe.get_site_path("private", "files", "cleaned_reports")
+            if os.path.exists(cleaned_dir):
+                for f in os.listdir(cleaned_dir):
+                    if f"cleaned_{doc.name}" in f or f"cleaned_{os.path.splitext(doc.name)[0]}" in f:
+                        try:
+                            file_path = os.path.join(cleaned_dir, f)
+                            os.remove(file_path)
+                            append_log(doc, f"Removed cleaned file {f}")
+                        except Exception as file_err:
+                            append_log(doc, f"⚠️ Could not remove file {f}: {str(file_err)[:100]}")
+        except Exception as dir_err:
+            append_log(doc, f"⚠️ Could not access cleaned_reports directory: {str(dir_err)[:100]}")
 
-        # 3. Optionally remove cleaned report file
-        cleaned_dir = frappe.get_site_path("private", "files", "cleaned_reports")
-        for f in os.listdir(cleaned_dir):
-            if f"cleaned_{doc.name}" in f:
-                try:
-                    os.remove(os.path.join(cleaned_dir, f))
-                    append_log(doc, f"Removed cleaned file {f}")
-                except Exception:
-                    pass
-
-        append_log(doc, "✅ Cancel complete: Attendance + imports removed")
+        append_log(doc, f"✅ Cancel complete: {deleted_count} Attendance records + {len(data_imports)} Data Imports removed")
 
     except Exception as e:
-        append_log(doc, f"❌ Cancel error: {str(e)}")
-        raise
+        import traceback
+        error_trace = traceback.format_exc()
+        append_log(doc, f"❌ Cancel error: {str(e)[:500]}")
+        append_log(doc, f"Traceback: {error_trace[:1000]}")
+        frappe.log_error(error_trace, f"Crystal Attendance Upload Cancel Error: {doc.name}")
+        # Don't raise - allow cancellation to proceed even if cleanup fails
 
 def after_insert_attendance(doc, method):
     """Automatically stamp Attendance with current Crystal Upload ref if available"""
