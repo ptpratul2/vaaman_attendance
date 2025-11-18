@@ -56,6 +56,69 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
 
      return s
 
+    def parse_time_to_hours(time_str):
+        """Convert time string (HH:MM or HH:MM:SS) to decimal hours"""
+        if not time_str or pd.isna(time_str):
+            return 0.0
+        try:
+            time_str = str(time_str).strip()
+            parts = time_str.split(":")
+            hours = int(parts[0])
+            minutes = int(parts[1]) if len(parts) > 1 else 0
+            seconds = int(parts[2]) if len(parts) > 2 else 0
+            return hours + minutes/60 + seconds/3600
+        except Exception:
+            return 0.0
+
+    def calculate_working_hours(intime, outtime, att_date):
+        """Calculate working hours from intime and outtime"""
+        if not intime or not outtime or not att_date:
+            return None, 0.0
+
+        try:
+            from datetime import datetime, timedelta
+
+            # Parse date
+            date_obj = pd.to_datetime(att_date).date()
+
+            # Parse intime
+            intime_str = str(intime).strip()
+            in_parts = intime_str.split(":")
+            in_hour = int(in_parts[0])
+            in_min = int(in_parts[1]) if len(in_parts) > 1 else 0
+            in_sec = int(in_parts[2]) if len(in_parts) > 2 else 0
+
+            # Parse outtime
+            outtime_str = str(outtime).strip()
+            out_parts = outtime_str.split(":")
+            out_hour = int(out_parts[0])
+            out_min = int(out_parts[1]) if len(out_parts) > 1 else 0
+            out_sec = int(out_parts[2]) if len(out_parts) > 2 else 0
+
+            # Create datetime objects
+            in_dt = datetime.combine(date_obj, datetime.min.time().replace(hour=in_hour, minute=in_min, second=in_sec))
+            out_dt = datetime.combine(date_obj, datetime.min.time().replace(hour=out_hour, minute=out_min, second=out_sec))
+
+            # If outtime is earlier than intime, assume it's next day
+            if out_dt < in_dt:
+                out_dt += timedelta(days=1)
+
+            # Calculate difference
+            diff = out_dt - in_dt
+            total_seconds = diff.total_seconds()
+            hours = total_seconds / 3600
+
+            # Format as HH:MM:SS
+            h = int(hours)
+            m = int((hours - h) * 60)
+            s = int(((hours - h) * 60 - m) * 60)
+            work_hrs_str = f"{h:02d}:{m:02d}:{s:02d}"
+
+            return work_hrs_str, hours
+        except Exception as e:
+            print(f"[clean_daily_inout24] Error calculating hours: {e}")
+            return None, 0.0
+
     records = []
 
     for _, row in df_raw.iterrows():
@@ -79,11 +142,29 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             print(f"[clean_daily_inout24] WARNING: Employee not found for Gate Pass {gate_pass}")
 
         # ------------------------
-        # Determine Status
+        # Calculate Working Hours and Determine Status
         # ------------------------
         status = "Absent"
-        if gross_hours and gross_hours.strip() not in ["", "0:00", "00:00"]:
-            status = "Present"
+        working_hours_str = ""  # Will be calculated from Intime/Outtime
+
+        # If both Intime and Outtime are present, calculate working hours
+        if intime and outtime:
+            calc_work_hrs, total_hours = calculate_working_hours(intime, outtime, att_date)
+
+            if calc_work_hrs:
+                working_hours_str = calc_work_hrs
+
+                # Determine status based on working hours
+                if total_hours >= 7:
+                    status = "Present"
+                elif total_hours >= 4.5:  # 4:30 = 4.5 hours
+                    status = "Half Day"
+                else:
+                    status = "Absent"
+        # If Intime or Outtime is missing, mark as Absent with no working hours
+        else:
+            status = "Absent"
+            working_hours_str = ""
 
         rec = {
             "Attendance Date": att_date,
@@ -94,9 +175,9 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             "Out Time": outtime,
             "Company": company if company else "",
             "Branch": branch if branch else "",
-            "Working Hours": gross_hours,
+            "Working Hours": working_hours_str,
             "Shift": shift if shift else "",
-            "Over Time": over_time  # ✅ new column
+            "Over Time": over_time
         }
         records.append(rec)
 
