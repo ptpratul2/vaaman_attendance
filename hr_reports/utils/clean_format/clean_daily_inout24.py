@@ -2,6 +2,7 @@
 import os
 import pandas as pd
 import frappe
+from datetime import datetime, timedelta, time
 
 def clean_daily_inout24(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
     print("=" * 80)
@@ -29,32 +30,32 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
     # Function: format "Extra/Less Hours" → decimal-like str
     # ------------------------------------------------------
     def format_extra_less(v):
-     if pd.isna(v):
-        return ""
+        if pd.isna(v):
+            return ""
 
-    # Case 1: Excel gave us a datetime.time or Timestamp
-     if hasattr(v, "hour") and hasattr(v, "minute"):
-        h = v.hour
-        m = v.minute
-        s = v.second
-        # If there are seconds → keep them as .ss, else only hh.mm
-        if s:
-            return f"{h}.{s:02d}"
-        else:
-            return f"{h}.{m:02d}"
+        # Case 1: Excel gave us a datetime.time or Timestamp
+        if hasattr(v, "hour") and hasattr(v, "minute"):
+            h = v.hour
+            m = v.minute
+            s = v.second
+            # If there are seconds → keep them as .ss, else only hh.mm
+            if s:
+                return f"{h}.{s:02d}"
+            else:
+                return f"{h}.{m:02d}"
 
-    # Case 2: It’s already a string like -1:-22: or 4:30
-     s = str(v).strip()
-     if not s:
-        return ""
+        # Case 2: It's already a string like -1:-22: or 4:30
+        s = str(v).strip()
+        if not s:
+            return ""
 
-    # Replace last ":" with "."
-     if ":" in s:
-        parts = s.split(":")
-        if len(parts) >= 2:
-            return ":".join(parts[:-1]) + "." + parts[-1]
+        # Replace last ":" with "."
+        if ":" in s:
+            parts = s.split(":")
+            if len(parts) >= 2:
+                return ":".join(parts[:-1]) + "." + parts[-1]
 
-     return s
+        return s
 
     def parse_time_to_hours(time_str):
         """Convert time string (HH:MM or HH:MM:SS) to decimal hours"""
@@ -70,34 +71,122 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
         except Exception:
             return 0.0
 
+    def detect_shift_from_checkin(checkin_time_str, att_date):
+        """
+        Detect shift based on check-in time
+        Shift definitions:
+        - A shift: 6 AM to 2 PM (check-in 5:30 AM to 2 PM)
+        - B shift: 2 PM to 10 PM (check-in 1:30 PM to 10 PM)
+        - C shift: 10 PM to 6 AM (check-in 9:30 PM to 6 AM next day)
+        - G shift: 9 AM to 5:30 PM (check-in 8:30 AM to 5:30 PM)
+        """
+        if not checkin_time_str or not att_date:
+            return None
+
+        try:
+            # Parse check-in time
+            checkin_parts = str(checkin_time_str).strip().split(":")
+            checkin_hour = int(checkin_parts[0])
+            checkin_min = int(checkin_parts[1]) if len(checkin_parts) > 1 else 0
+            checkin_time = time(checkin_hour, checkin_min)
+
+            # Parse date
+            date_obj = pd.to_datetime(att_date).date()
+            checkin_datetime = datetime.combine(date_obj, checkin_time)
+
+            # Shift definitions with 30-minute buffer before start
+            # C shift: 10 PM to 6 AM next day (9:30 PM to 5:30 AM next day) - spans midnight
+            # Note: C shift ends at 5:30 AM (30 min before A shift starts at 6 AM)
+            c_start = datetime.combine(date_obj, time(21, 30))
+            c_end = datetime.combine(date_obj + timedelta(days=1), time(5, 30))
+
+            # G shift: 9 AM to 5:30 PM (8:30 AM to 5:30 PM)
+            g_start = datetime.combine(date_obj, time(8, 30))
+            g_end = datetime.combine(date_obj, time(17, 30))
+
+            # A shift: 6 AM to 2 PM (5:30 AM to 2 PM)
+            a_start = datetime.combine(date_obj, time(5, 30))
+            a_end = datetime.combine(date_obj, time(14, 0))
+
+            # B shift: 2 PM to 10 PM (1:30 PM to 10 PM)
+            b_start = datetime.combine(date_obj, time(13, 30))
+            b_end = datetime.combine(date_obj, time(22, 0))
+
+            # Check which shift the check-in time falls into
+            # Priority order: C (night shift), G, A, B
+            
+            # Handle C shift (spans midnight - 9:30 PM to 5:30 AM next day)
+            if checkin_datetime >= c_start:
+                return "C"
+            elif checkin_datetime < datetime.combine(date_obj, time(5, 30)):
+                return "C"
+            # Check G shift (8:30 AM to 5:30 PM) - overlaps with A and B, check first
+            elif g_start <= checkin_datetime <= g_end:
+                return "G"
+            # Check A shift (5:30 AM to 2 PM, excluding G shift range)
+            elif a_start <= checkin_datetime <= a_end:
+                return "A"
+            # Check B shift (1:30 PM to 10 PM, excluding G shift range)
+            elif b_start <= checkin_datetime <= b_end:
+                return "B"
+            else:
+                # Default to A shift if no match (fallback)
+                return "A"
+
+        except Exception as e:
+            print(f"[clean_daily_inout24] Error detecting shift: {e}")
+            return None
+
+    def parse_to_datetime(time_value, att_date):
+        """
+        Parse time value to datetime object for ERPNext
+        Handles both datetime objects and time strings
+        """
+        if not time_value or not att_date:
+            return None
+
+        try:
+            # If it's already a datetime object
+            if isinstance(time_value, datetime):
+                return time_value
+            
+            # If it's a pandas Timestamp
+            if isinstance(time_value, pd.Timestamp):
+                return time_value.to_pydatetime()
+            
+            # Parse date
+            date_obj = pd.to_datetime(att_date).date()
+
+            # Parse time string
+            time_str = str(time_value).strip()
+            # Handle datetime string format (e.g., "2024-01-15 09:30:00")
+            if " " in time_str:
+                return pd.to_datetime(time_str).to_pydatetime()
+            
+            # Handle time-only string (HH:MM or HH:MM:SS)
+            time_parts = time_str.split(":")
+            in_hour = int(time_parts[0])
+            in_min = int(time_parts[1]) if len(time_parts) > 1 else 0
+            in_sec = int(time_parts[2]) if len(time_parts) > 2 else 0
+
+            # Create datetime object
+            return datetime.combine(date_obj, time(in_hour, in_min, in_sec))
+        except Exception as e:
+            print(f"[clean_daily_inout24] Error parsing datetime: {e}, value: {time_value}")
+            return None
+
     def calculate_working_hours(intime, outtime, att_date):
-        """Calculate working hours from intime and outtime"""
+        """Calculate working hours from intime and outtime (datetime objects)"""
         if not intime or not outtime or not att_date:
             return None, 0.0
 
         try:
-            from datetime import datetime, timedelta
+            # Parse to datetime objects
+            in_dt = parse_to_datetime(intime, att_date)
+            out_dt = parse_to_datetime(outtime, att_date)
 
-            # Parse date
-            date_obj = pd.to_datetime(att_date).date()
-
-            # Parse intime
-            intime_str = str(intime).strip()
-            in_parts = intime_str.split(":")
-            in_hour = int(in_parts[0])
-            in_min = int(in_parts[1]) if len(in_parts) > 1 else 0
-            in_sec = int(in_parts[2]) if len(in_parts) > 2 else 0
-
-            # Parse outtime
-            outtime_str = str(outtime).strip()
-            out_parts = outtime_str.split(":")
-            out_hour = int(out_parts[0])
-            out_min = int(out_parts[1]) if len(out_parts) > 1 else 0
-            out_sec = int(out_parts[2]) if len(out_parts) > 2 else 0
-
-            # Create datetime objects
-            in_dt = datetime.combine(date_obj, datetime.min.time().replace(hour=in_hour, minute=in_min, second=in_sec))
-            out_dt = datetime.combine(date_obj, datetime.min.time().replace(hour=out_hour, minute=out_min, second=out_sec))
+            if not in_dt or not out_dt:
+                return None, 0.0
 
             # If outtime is earlier than intime, assume it's next day
             if out_dt < in_dt:
@@ -125,11 +214,30 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
         gate_pass = str(row.get("Gate Pass")).strip() if pd.notna(row.get("Gate Pass")) else None
         emp_name = str(row.get("Name")).strip() if pd.notna(row.get("Name")) else None
         att_date = pd.to_datetime(row.get("Date")).strftime("%Y-%m-%d") if pd.notna(row.get("Date")) else None
-        intime = str(row.get("Intime")).strip() if pd.notna(row.get("Intime")) else None
-        outtime = str(row.get("Outtime")).strip() if pd.notna(row.get("Outtime")) else None
+        intime_raw = row.get("Intime") if pd.notna(row.get("Intime")) else None
+        outtime_raw = row.get("Outtime") if pd.notna(row.get("Outtime")) else None
         gross_hours = str(row.get("GROSSHOURS")).strip() if pd.notna(row.get("GROSSHOURS")) else None
-        shift = str(row.get("Shift")).strip() if pd.notna(row.get("Shift")) else None
+        shift = str(row.get("Shift")).strip() if pd.notna(row.get("Shift")) and str(row.get("Shift")).strip() else None
         over_time = format_extra_less(row.get("Extra/Less Hours"))
+
+        # ------------------------
+        # Parse intime/outtime to datetime objects for ERPNext
+        # ------------------------
+        intime_dt = parse_to_datetime(intime_raw, att_date) if intime_raw else None
+        outtime_dt = parse_to_datetime(outtime_raw, att_date) if outtime_raw else None
+
+        # Format datetime for ERPNext (YYYY-MM-DD HH:MM:SS)
+        intime_str = intime_dt.strftime("%Y-%m-%d %H:%M:%S") if intime_dt else ""
+        outtime_str = outtime_dt.strftime("%Y-%m-%d %H:%M:%S") if outtime_dt else ""
+
+        # ------------------------
+        # Auto-detect shift if blank
+        # ------------------------
+        if not shift and intime_dt:
+            detected_shift = detect_shift_from_checkin(intime_raw, att_date)
+            if detected_shift:
+                shift = detected_shift
+                print(f"[clean_daily_inout24] Auto-detected shift '{shift}' for check-in {intime_str}")
 
         # ------------------------
         # Map Gate Pass → Employee ID
@@ -148,8 +256,8 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
         working_hours_str = ""  # Will be calculated from Intime/Outtime
 
         # If both Intime and Outtime are present, calculate working hours
-        if intime and outtime:
-            calc_work_hrs, total_hours = calculate_working_hours(intime, outtime, att_date)
+        if intime_dt and outtime_dt:
+            calc_work_hrs, total_hours = calculate_working_hours(intime_dt, outtime_dt, att_date)
 
             if calc_work_hrs:
                 working_hours_str = calc_work_hrs
@@ -171,8 +279,8 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             "Employee": employee_id if employee_id else "",
             "Employee Name": emp_name,
             "Status": status,
-            "In Time": intime,
-            "Out Time": outtime,
+            "In Time": intime_str,  # Datetime format for ERPNext
+            "Out Time": outtime_str,  # Datetime format for ERPNext
             "Company": company if company else "",
             "Branch": branch if branch else "",
             "Working Hours": working_hours_str,
