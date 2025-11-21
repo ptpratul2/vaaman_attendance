@@ -12,7 +12,7 @@ def _to_float(v):
 
 def execute(filters=None):
     frappe.clear_cache()
-   columns = [
+    columns = [
        {"fieldname": "branch", "label": "Branch", "fieldtype": "Data"},
        {"fieldname": "employee", "label": "Employee", "fieldtype": "Data"},
        {"fieldname": "attendance_date", "label": "Date", "fieldtype": "Date"},
@@ -20,18 +20,17 @@ def execute(filters=None):
        {"fieldname": "system_overtime", "label": "System OT", "fieldtype": "Float"},
        {"fieldname": "shift", "label": "Shift", "fieldtype": "Data"},
        {"fieldname": "mismatch", "label": "Mismatch", "fieldtype": "Data"},
-   ]
+    ]
 
-   data = []
+    data = []
 
-   if not filters or not filters.get("overtime_import"):
-       frappe.msgprint("Please select an Overtime Import to view mismatches.")
-       return columns, data
+    if not filters or not filters.get("overtime_import"):
+        frappe.msgprint("Please select an Overtime Import to view mismatches.")
+        return columns, data
+    oi_name = filters.get("overtime_import")
+    doc = frappe.get_doc("OverTime Import", oi_name)
 
-   oi_name = filters.get("overtime_import")
-   doc = frappe.get_doc("OverTime Import", oi_name)
-
-   for row in doc.overtime_import_details:
+    for row in doc.overtime_import_details:
        imported_ot = _to_float(row.over_time)
        system_ot = 0.0
        attendance_name = frappe.db.get_value(
@@ -70,7 +69,7 @@ def execute(filters=None):
            rec["_mismatch_fields"] = ["import_overtime", "system_overtime"]
        data.append(rec)
 
-   if not data:
+    if not data:
        data.append(
            {
                "branch": "TEST",
@@ -83,5 +82,5 @@ def execute(filters=None):
            }
        )
 
-   return columns, data
+    return columns, data
 
