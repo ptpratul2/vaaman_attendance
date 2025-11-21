@@ -31,13 +31,51 @@ def convert_xls_to_xlsx(xls_path: str) -> str:
     print(f"[convert_xls_to_xlsx] Saved temporary .xlsx: {temp_xlsx}")
     return temp_xlsx
 
+def parse_date_dd_mm_yyyy(date_val):
+    """Parse date string in DD/MM/YYYY format"""
+    if pd.isna(date_val):
+        return None
+    
+    # If already a datetime object, return it
+    if isinstance(date_val, (datetime, pd.Timestamp)):
+        return date_val
+    
+    try:
+        date_str = str(date_val).strip()
+        if not date_str or date_str.lower() in ["nan", "none", ""]:
+            return None
+        
+        # Try DD/MM/YYYY format first
+        try:
+            return pd.to_datetime(date_str, format="%d/%m/%Y", errors="raise")
+        except (ValueError, TypeError):
+            pass
+        
+        # Try DD-MM-YYYY format
+        try:
+            return pd.to_datetime(date_str, format="%d-%m-%Y", errors="raise")
+        except (ValueError, TypeError):
+            pass
+        
+        # Try other common formats
+        try:
+            return pd.to_datetime(date_str, format="%Y-%m-%d", errors="raise")
+        except (ValueError, TypeError):
+            pass
+        
+        # Last resort: let pandas infer (but this might cause the issue)
+        return pd.to_datetime(date_str, errors="coerce")
+    except Exception:
+        return None
+
 def format_datetime(date_val, time_val):
     if pd.isna(date_val):
         return None
 
+    # Parse date using DD/MM/YYYY format
     if not isinstance(date_val, (datetime, pd.Timestamp)):
-        date_val = pd.to_datetime(date_val, errors="coerce")
-    if pd.isna(date_val):
+        date_val = parse_date_dd_mm_yyyy(date_val)
+    if pd.isna(date_val) or date_val is None:
         return None
 
     if isinstance(time_val, timedelta):
@@ -162,24 +200,32 @@ def clean_daily_inout13(input_path: str, output_path: str, company: str = None, 
     for _, row in df_raw.iterrows():
         emp_id = str(row.get("Employee ID")).strip() if pd.notna(row.get("Employee ID")) else None
         emp_name = str(row.get("Employee Name")).strip() if pd.notna(row.get("Employee Name")) else None
-        att_date = row.get("Attand Date")
+        att_date_raw = row.get("Attand Date")
         time_in = row.get("In Time")
         time_out = row.get("Out Time")
         work_hrs = str(row.get("Total Hour")).strip() if pd.notna(row.get("Total Hour")) else None
         status_raw = row.get("Status")
+
+        # Parse attendance date in DD/MM/YYYY format first
+        parsed_att_date = parse_date_dd_mm_yyyy(att_date_raw)
+        if parsed_att_date is None or pd.isna(parsed_att_date):
+            print(f"[clean_daily_inout13] WARNING: Could not parse date {att_date_raw} for {emp_id} {emp_name}, skipping row")
+            continue
+        
+        att_date_str = parsed_att_date.strftime("%Y-%m-%d")
 
         # Apply mapping
         status = map_status(status_raw )
 
          # Skip holidays and blank/empty rows
         if status == "Holiday":
-            print(f"[clean_daily_inout13] Skipping {emp_id} {emp_name} on {att_date} (Holiday)")
+            print(f"[clean_daily_inout13] Skipping {emp_id} {emp_name} on {att_date_str} (Holiday)")
             continue
         if (pd.isna(time_in) or str(time_in).strip() == "") and \
             (pd.isna(time_out) or str(time_out).strip() == "") and \
             (pd.isna(work_hrs) or str(work_hrs).strip() == "") and \
             (pd.isna(status_raw) or str(status_raw).strip() == ""):
-            print(f"[clean_daily_inout13] Skipping {emp_id} {emp_name} on {att_date} (Empty Row)")
+            print(f"[clean_daily_inout13] Skipping {emp_id} {emp_name} on {att_date_str} (Empty Row)")
             continue
 
 
@@ -191,15 +237,14 @@ def clean_daily_inout13(input_path: str, output_path: str, company: str = None, 
                 employee_id = emp_doc.name
             except Exception:
                 print(f"[clean_daily_inout13] WARNING: Employee not found for GP No {emp_id}")
-
-
-        in_time_fmt = format_datetime(att_date, time_in)
-        out_time_fmt = format_datetime(att_date, time_out)
+        
+        in_time_fmt = format_datetime(parsed_att_date, time_in)
+        out_time_fmt = format_datetime(parsed_att_date, time_out)
         shift = detect_shift(in_time_fmt, out_time_fmt)
         overtime_val = _calculate_overtime(work_hrs, shift)
 
         rec = {
-            "Attendance Date": pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
+            "Attendance Date": att_date_str,
             "Employee": employee_id if employee_id else "",
             "Employee Name": emp_name,
             "Status": status,
