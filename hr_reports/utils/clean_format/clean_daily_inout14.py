@@ -268,7 +268,14 @@ def merge_overlapping_attendances(df):
         work_hrs_decimal = _seconds_to_decimal_hours(total_seconds)  # Decimal hours for Frappe
         overtime = _calculate_overtime_from_seconds(total_seconds)
 
-        status = "Present" if total_seconds and total_seconds > 0 else group.iloc[0]['Status']
+        # Status logic based on working hours thresholds (same as clean_daily_inout24.py)
+        status = "Absent"
+        if work_hrs_decimal >= 7.0:
+            status = "Present"
+        elif work_hrs_decimal >= 4.5:
+            status = "Half Day"
+        else:
+            status = "Absent"
 
         merged_row = {
             'Employee': emp,
@@ -373,11 +380,6 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
                 if failed_gp_count <= 5:  # Only print first 5
                     print(f"[clean_daily_inout14] WARNING: Employee not found for GP No '{gp_no}' (Name: {emp_name}) - Error: {str(e)[:100]}")
 
-        # Status logic
-        status = "Absent"
-        if work_hrs and work_hrs not in ["", "0:00", "00:00"]:
-            status = "Present"
-
         # Format In/Out time
         in_time_fmt = format_datetime(att_date, time_in) or format_datetime(att_date, "09:00:00")
         out_time_fmt = format_datetime(att_date, time_out) or format_datetime(att_date, "17:00:00")
@@ -406,6 +408,15 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
         else:
             # Use Excel value converted to decimal
             work_hrs_decimal = _to_float_workhrs(work_hrs)
+
+        # Status logic based on working hours thresholds (same as clean_daily_inout24.py)
+        status = "Absent"
+        if work_hrs_decimal >= 7.0:
+            status = "Present"
+        elif work_hrs_decimal >= 4.5:
+            status = "Half Day"
+        else:
+            status = "Absent"
 
         # Overtime calculation (using decimal hours)
         overtime_val = _calculate_overtime_from_seconds(work_hrs_decimal * 3600) if work_hrs_decimal > 0 else ""

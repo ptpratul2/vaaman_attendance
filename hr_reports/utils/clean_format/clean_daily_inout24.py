@@ -197,13 +197,10 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             total_seconds = diff.total_seconds()
             hours = total_seconds / 3600
 
-            # Format as HH:MM:SS
-            h = int(hours)
-            m = int((hours - h) * 60)
-            s = int(((hours - h) * 60 - m) * 60)
-            work_hrs_str = f"{h:02d}:{m:02d}:{s:02d}"
+            # Format as decimal (e.g., 16.00)
+            work_hrs_float = round(hours, 2)
 
-            return work_hrs_str, hours
+            return work_hrs_float, hours
         except Exception as e:
             print(f"[clean_daily_inout24] Error calculating hours: {e}")
             return None, 0.0
@@ -253,14 +250,14 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
         # Calculate Working Hours and Determine Status
         # ------------------------
         status = "Absent"
-        working_hours_str = ""  # Will be calculated from Intime/Outtime
+        working_hours_float = 0.0  # Will be calculated from Intime/Outtime
 
         # If both Intime and Outtime are present, calculate working hours
         if intime_dt and outtime_dt:
             calc_work_hrs, total_hours = calculate_working_hours(intime_dt, outtime_dt, att_date)
 
-            if calc_work_hrs:
-                working_hours_str = calc_work_hrs
+            if calc_work_hrs is not None:
+                working_hours_float = calc_work_hrs
 
                 # Determine status based on working hours
                 if total_hours >= 7:
@@ -272,7 +269,7 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
         # If Intime or Outtime is missing, mark as Absent with no working hours
         else:
             status = "Absent"
-            working_hours_str = ""
+            working_hours_float = 0.0
 
         rec = {
             "Attendance Date": att_date,
@@ -283,7 +280,7 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             "Out Time": outtime_str,  # Datetime format for ERPNext
             "Company": company if company else "",
             "Branch": branch if branch else "",
-            "Working Hours": working_hours_str,
+            "Working Hours": working_hours_float,
             "Shift": shift if shift else "",
             "Over Time": over_time
         }
