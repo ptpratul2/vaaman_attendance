@@ -1,6 +1,8 @@
 # attendance_flow.py
 import frappe
 import os
+import json
+import time
 from hr_reports.utils.clean_format.clean_crystal_excel import clean_crystal_excel
 from hr_reports.utils.clean_format.clean_daily_inout24 import clean_daily_inout24
 from hr_reports.utils.clean_format.clean_daily_inout14 import clean_daily_inout14
@@ -16,6 +18,278 @@ def append_log(doc, message):
     """Append log line to processing_log field with timestamp"""
     new_log = (doc.processing_log or "") + f"\n{frappe.utils.now()} - {message}"
     doc.db_set("processing_log", new_log, update_modified=False)
+
+
+def get_import_status_summary(data_import_name):
+    """Get import status summary"""
+    try:
+        data_import = frappe.get_doc("Data Import", data_import_name)
+        status = data_import.status or "Pending"
+        
+        # Get log counts
+        logs = frappe.get_all(
+            "Data Import Log",
+            fields=["count(*) as count", "success"],
+            filters={"data_import": data_import_name},
+            group_by="success",
+        )
+        
+        total_payload = data_import.payload_count or 0
+        success_count = 0
+        failed_count = 0
+        
+        for log in logs:
+            if log.get("success"):
+                success_count = log.get("count", 0)
+            else:
+                failed_count = log.get("count", 0)
+        
+        return {
+            "status": status,
+            "total": total_payload,
+            "success": success_count,
+            "failed": failed_count
+        }
+    except Exception as e:
+        return {
+            "status": "Error",
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "error": str(e)
+        }
+
+
+def get_import_logs_detailed(data_import_name, limit=100):
+    """Get detailed import logs with errors"""
+    try:
+        logs = frappe.get_all(
+            "Data Import Log",
+            fields=["success", "docname", "messages", "exception", "row_indexes", "log_index"],
+            filters={"data_import": data_import_name},
+            limit_page_length=limit,
+            order_by="log_index",
+        )
+        return logs
+    except Exception as e:
+        return []
+
+
+def log_import_results(crystal_upload_name, data_import_name):
+    """Monitor and log Data Import results"""
+    try:
+        # Wait a bit for import to start
+        time.sleep(2)
+        
+        max_wait_time = 1800  # 30 minutes max wait for large imports
+        check_interval = 5  # Check every 5 seconds
+        status_update_interval = 30  # Log status update every 30 seconds
+        elapsed_time = 0
+        last_status_update = 0
+        
+        crystal_upload = frappe.get_doc("Crystal Attendance Upload", crystal_upload_name)
+        
+        while elapsed_time < max_wait_time:
+            try:
+                status_summary = get_import_status_summary(data_import_name)
+                status = status_summary.get("status", "Pending")
+                
+                # Log periodic status updates while waiting
+                if elapsed_time - last_status_update >= status_update_interval:
+                    total = status_summary.get('total', 0)
+                    success = status_summary.get('success', 0)
+                    failed = status_summary.get('failed', 0)
+                    minutes_elapsed = elapsed_time // 60
+                    seconds_elapsed = elapsed_time % 60
+                    
+                    if status == "Pending":
+                        append_log(crystal_upload, f"⏳ Still processing... ({minutes_elapsed}m {seconds_elapsed}s elapsed)")
+                        if total > 0:
+                            append_log(crystal_upload, f"   Progress: {success + failed}/{total} records processed")
+                    else:
+                        # Status changed, log it
+                        append_log(crystal_upload, f"📊 Status changed to: {status}")
+                    
+                    last_status_update = elapsed_time
+                
+                # If import is complete (Success, Partial Success, Error, Timed Out)
+                if status in ["Success", "Partial Success", "Error", "Timed Out"]:
+                    append_log(crystal_upload, f"\n📊 Data Import Status: {status}")
+                    append_log(crystal_upload, f"   Total Records: {status_summary.get('total', 0)}")
+                    append_log(crystal_upload, f"   ✅ Successful: {status_summary.get('success', 0)}")
+                    append_log(crystal_upload, f"   ❌ Failed: {status_summary.get('failed', 0)}")
+                    
+                    # Get detailed logs for failures
+                    if status_summary.get("failed", 0) > 0:
+                        append_log(crystal_upload, f"\n📋 Failed Import Details:")
+                        failed_logs = get_import_logs_detailed(data_import_name, limit=50)
+                        
+                        error_count = 0
+                        for log in failed_logs:
+                            if not log.get("success"):
+                                error_count += 1
+                                if error_count <= 20:  # Limit to first 20 errors to avoid log spam
+                                    row_indexes = json.loads(log.get("row_indexes") or "[]")
+                                    messages = json.loads(log.get("messages") or "[]")
+                                    
+                                    # Extract error messages
+                                    error_msgs = []
+                                    for msg in messages:
+                                        if isinstance(msg, dict):
+                                            if msg.get("title"):
+                                                error_msgs.append(msg.get("title"))
+                                            if msg.get("message"):
+                                                error_msgs.append(msg.get("message"))
+                                        elif isinstance(msg, str):
+                                            error_msgs.append(msg)
+                                    
+                                    error_text = " | ".join(error_msgs[:3])  # Limit to first 3 messages
+                                    if not error_text and log.get("exception"):
+                                        # Extract first line of exception
+                                        exception_lines = log.get("exception", "").split("\n")
+                                        error_text = exception_lines[0] if exception_lines else "Unknown error"
+                                    
+                                    row_str = ", ".join(map(str, row_indexes[:5]))  # Show first 5 row indexes
+                                    if len(row_indexes) > 5:
+                                        row_str += f" ... (+{len(row_indexes) - 5} more)"
+                                    
+                                    append_log(crystal_upload, f"   Row {row_str}: {error_text[:200]}")
+                        
+                        if error_count > 20:
+                            append_log(crystal_upload, f"   ... ({error_count - 20} more errors - check Data Import {data_import_name} for full details)")
+                    
+                    # Log common errors summary
+                    if status == "Error":
+                        append_log(crystal_upload, f"\n⚠️ Import Failed Completely - All records failed")
+                    elif status == "Partial Success":
+                        append_log(crystal_upload, f"\n⚠️ Partial Import - Some records failed. Review failed records above.")
+                    elif status == "Success":
+                        append_log(crystal_upload, f"\n✅ Full Import Success - All records imported successfully")
+                    
+                    break
+                
+                # Still pending, wait and check again
+                time.sleep(check_interval)
+                elapsed_time += check_interval
+                
+            except frappe.DoesNotExistError:
+                append_log(crystal_upload, f"⚠️ Data Import {data_import_name} not found")
+                break
+            except Exception as e:
+                append_log(crystal_upload, f"⚠️ Error checking import status: {str(e)[:200]}")
+                time.sleep(check_interval)
+                elapsed_time += check_interval
+        
+        # If we timed out waiting
+        if elapsed_time >= max_wait_time:
+            status_summary = get_import_status_summary(data_import_name)
+            status = status_summary.get('status', 'Unknown')
+            total = status_summary.get('total', 0)
+            success = status_summary.get('success', 0)
+            failed = status_summary.get('failed', 0)
+            
+            append_log(crystal_upload, f"\n⏱️ Import monitoring timed out after {max_wait_time // 60} minutes")
+            append_log(crystal_upload, f"   Current Status: {status}")
+            if total > 0:
+                append_log(crystal_upload, f"   Progress: {success + failed}/{total} records processed")
+            append_log(crystal_upload, f"   Use 'Refresh Import Status' button to check final status")
+            append_log(crystal_upload, f"   Or check Data Import {data_import_name} manually")
+    
+    except Exception as e:
+        try:
+            crystal_upload = frappe.get_doc("Crystal Attendance Upload", crystal_upload_name)
+            append_log(crystal_upload, f"❌ Error logging import results: {str(e)[:300]}")
+        except:
+            pass
+
+
+@frappe.whitelist()
+def refresh_import_status(crystal_upload_name):
+    """Manually refresh import status - can be called from UI"""
+    try:
+        # Get the linked Data Import
+        data_imports = frappe.get_all(
+            "Data Import",
+            filters={"custom_crystal_upload_ref": crystal_upload_name},
+            fields=["name"],
+            limit=1,
+            order_by="creation desc"
+        )
+        
+        if not data_imports:
+            return {"error": "No Data Import found for this upload"}
+        
+        data_import_name = data_imports[0].name
+        crystal_upload = frappe.get_doc("Crystal Attendance Upload", crystal_upload_name)
+        
+        status_summary = get_import_status_summary(data_import_name)
+        status = status_summary.get("status", "Pending")
+        
+        append_log(crystal_upload, f"\n🔄 Manual Status Refresh:")
+        append_log(crystal_upload, f"   Status: {status}")
+        append_log(crystal_upload, f"   Total Records: {status_summary.get('total', 0)}")
+        append_log(crystal_upload, f"   ✅ Successful: {status_summary.get('success', 0)}")
+        append_log(crystal_upload, f"   ❌ Failed: {status_summary.get('failed', 0)}")
+        
+        # If complete, log full details
+        if status in ["Success", "Partial Success", "Error", "Timed Out"]:
+            # Get detailed logs for failures
+            if status_summary.get("failed", 0) > 0:
+                append_log(crystal_upload, f"\n📋 Failed Import Details:")
+                failed_logs = get_import_logs_detailed(data_import_name, limit=50)
+                
+                error_count = 0
+                for log in failed_logs:
+                    if not log.get("success"):
+                        error_count += 1
+                        if error_count <= 20:
+                            row_indexes = json.loads(log.get("row_indexes") or "[]")
+                            messages = json.loads(log.get("messages") or "[]")
+                            
+                            error_msgs = []
+                            for msg in messages:
+                                if isinstance(msg, dict):
+                                    if msg.get("title"):
+                                        error_msgs.append(msg.get("title"))
+                                    if msg.get("message"):
+                                        error_msgs.append(msg.get("message"))
+                                elif isinstance(msg, str):
+                                    error_msgs.append(msg)
+                            
+                            error_text = " | ".join(error_msgs[:3])
+                            if not error_text and log.get("exception"):
+                                exception_lines = log.get("exception", "").split("\n")
+                                error_text = exception_lines[0] if exception_lines else "Unknown error"
+                            
+                            row_str = ", ".join(map(str, row_indexes[:5]))
+                            if len(row_indexes) > 5:
+                                row_str += f" ... (+{len(row_indexes) - 5} more)"
+                            
+                            append_log(crystal_upload, f"   Row {row_str}: {error_text[:200]}")
+                
+                if error_count > 20:
+                    append_log(crystal_upload, f"   ... ({error_count - 20} more errors - check Data Import {data_import_name} for full details)")
+            
+            # Log summary
+            if status == "Error":
+                append_log(crystal_upload, f"\n⚠️ Import Failed Completely - All records failed")
+            elif status == "Partial Success":
+                append_log(crystal_upload, f"\n⚠️ Partial Import - Some records failed. Review failed records above.")
+            elif status == "Success":
+                append_log(crystal_upload, f"\n✅ Full Import Success - All records imported successfully")
+        else:
+            append_log(crystal_upload, f"   ⏳ Import still in progress...")
+        
+        return {
+            "status": status,
+            "total": status_summary.get('total', 0),
+            "success": status_summary.get('success', 0),
+            "failed": status_summary.get('failed', 0)
+        }
+    
+    except Exception as e:
+        frappe.log_error(f"Error refreshing import status: {str(e)}")
+        return {"error": str(e)}
 
 
 def process_uploaded_file(doc, method):
@@ -153,9 +427,22 @@ def process_uploaded_file(doc, method):
             frappe.flags.current_crystal_upload = doc.name
 
             start_import(data_import.name)
-            append_log(doc, f"Step 4: Import started for {data_import.name}. Check Import Log for details.")
+            append_log(doc, f"Step 4: Import started for {data_import.name}")
+            append_log(doc, f"   Monitoring import status...")
+            
+            # Enqueue background job to monitor and log import results
+            frappe.enqueue(
+                "hr_reports.utils.attendance_flow.log_import_results",
+                crystal_upload_name=doc.name,
+                data_import_name=data_import.name,
+                queue="default",
+                timeout=600  # 10 minutes timeout
+            )
+            
         except Exception as e:
-            append_log(doc, f"❌ Import failed: {str(e)}")
+            append_log(doc, f"❌ Import failed to start: {str(e)}")
+            import traceback
+            append_log(doc, f"   Traceback: {traceback.format_exc()[:500]}")
             raise
         finally:
             frappe.flags.current_crystal_upload = None  # always clear
@@ -165,6 +452,7 @@ def process_uploaded_file(doc, method):
         # Done
         # ------------------------
         append_log(doc, "✅ Process complete: Upload → Clean → Auto Import triggered")
+        append_log(doc, "   Import results will be logged here once processing completes...")
 
     except Exception as e:
         append_log(doc, f"❌ ERROR: {str(e)}")
