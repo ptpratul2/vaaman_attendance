@@ -215,9 +215,24 @@ def clean_daily_inout13(input_path: str, output_path: str, company: str = None, 
         att_date_str = parsed_att_date.strftime("%Y-%m-%d")
 
         # Apply mapping
-        status = map_status(status_raw )
+        status = map_status(status_raw)
 
-         # Skip holidays and blank/empty rows
+        # For specific statuses (O, E, AP), apply working hours threshold logic
+        if status_raw and str(status_raw).strip().upper() in ["O", "E", "AP"]:
+            # Calculate working hours as decimal
+            work_hrs_decimal = _to_float_workhrs(work_hrs)
+
+            # Status logic based on working hours thresholds
+            if work_hrs_decimal >= 7.0:
+                status = "Present"
+            elif work_hrs_decimal >= 4.5:
+                status = "Half Day"
+            else:
+                status = "Absent"
+
+            print(f"[clean_daily_inout13] Applied hours-based status for {emp_id} {emp_name} on {att_date_str}: {work_hrs_decimal}h -> {status}")
+
+        # Skip holidays and blank/empty rows
         if status == "Holiday":
             print(f"[clean_daily_inout13] Skipping {emp_id} {emp_name} on {att_date_str} (Holiday)")
             continue
