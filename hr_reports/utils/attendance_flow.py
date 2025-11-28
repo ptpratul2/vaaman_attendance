@@ -313,7 +313,7 @@ def process_uploaded_file(doc, method):
         cleaned_dir = frappe.get_site_path("private", "files", "cleaned_reports")
         os.makedirs(cleaned_dir, exist_ok=True)
         cleaned_path = os.path.join(cleaned_dir, f"cleaned_{os.path.splitext(file_name)[0]}.xlsx")
-        hzl = ["HZL SK MILL","HZL RD PASTEFILL","HZL Debari O&M","HZL Debari MH","HZL Zawar Stores","HZL SKM Shaft","HZL SKM MH","HZL SKM Conveyor","HZL RDM MH","HZL Ram MH","HZL Pyro O&M","HZL Kayad MH","HZL Debari MCTP","HZL Dariba MH","HZL Chanderia MH","HZL Silver Pantnagar","HZL Pantnagar","HZL Haridwar"]
+        hzl = ["HZL SK MILL","HZL RD PASTEFILL","HZL Debari O&M","HZL Debari MH","HZL Zawar Stores","HZL SKM Shaft","HZL SKM MH","HZL SKM Conveyor","HZL RDM MH","HZL Ram MH","HZL Pyro O&M","HZL Kayad MH","HZL Debari MCTP", "Dariba CPP","HZL Dariba MH","HZL Chanderia MH","HZL Silver Pantnagar","HZL Pantnagar","HZL Haridwar"]
 
         # Choose cleaning function based on Branch
         if doc.branch in ["Vedanta Jharsuguda P2","Vedanta Jharsuguda P1"]:
