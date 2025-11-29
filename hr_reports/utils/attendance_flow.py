@@ -12,6 +12,7 @@ from hr_reports.utils.clean_format.clean_daily_inout11 import clean_daily_inout1
 from hr_reports.utils.clean_format.clean_daily_inout10 import clean_daily_inout10
 from hr_reports.utils.clean_format.clean_daily_inout29 import clean_daily_inout29
 from hr_reports.utils.clean_format.clean_daily_inout7 import clean_daily_inout7
+from hr_reports.utils.clean_format.clean_daily_inout7_1 import clean_daily_inout7_1
 from frappe.core.doctype.data_import.data_import import start_import
 
 
@@ -383,6 +384,15 @@ def process_uploaded_file(doc, method):
 
         elif doc.branch in ["Tata Kalinganagar", "Tata Steel Jamshedpur", "JAMSHEDPUR"]:
             clean_daily_inout7(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout7 for Tata Angul")
+
+        elif doc.branch in ["Tata Angul"]:
+            clean_daily_inout7_1(
                 input_path=local_path,
                 output_path=cleaned_path,
                 company=doc.company,
