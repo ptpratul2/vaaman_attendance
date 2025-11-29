@@ -381,7 +381,7 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout29 for PARADIP")
 
-        elif doc.branch in ["Tata Kalinganagar"]:
+        elif doc.branch in ["Tata Kalinganagar", "Tata Steel Jamshedpur", "JAMSHEDPUR"]:
             clean_daily_inout7(
                 input_path=local_path,
                 output_path=cleaned_path,
