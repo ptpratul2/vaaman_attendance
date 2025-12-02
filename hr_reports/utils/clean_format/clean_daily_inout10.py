@@ -23,7 +23,7 @@ def format_datetime(date_val, time_val):
         try:
             t_str = str(time_val).strip()
             if not t_str or t_str.lower() in ["nan", "none"]:
-                return None
+                return None 
             parts = t_str.replace(".", ":").split(":")
             hours = int(parts[0])
             minutes = int(parts[1]) if len(parts) > 1 else 0
@@ -69,6 +69,9 @@ def map_status(raw_status) -> str:
     s = "" if pd.isna(raw_status) else str(raw_status).strip()
     mapping = {
         "P": "Present",
+        "PW": "Present",
+        "E": "Present",
+        "SPW": "Present",
         "A": "Absent",
         "HD": "Half Day",
         "P/2": "Half Day",
@@ -123,17 +126,53 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
+    # Build employee lookup cache: attendance_device_id -> employee_name
+    print("[clean_daily_inout10] Building employee lookup cache...")
+    employee_cache = {}
+    try:
+        # Try without status filter first to get all employees
+        employees = frappe.get_all('Employee',
+            fields=['name', 'attendance_device_id', 'employee_name']
+        )
+        total_employees = len(employees)
+        employees_with_device_id = 0
+
+        for emp in employees:
+            if emp.get('attendance_device_id'):
+                try:
+                    # Store as string to match with Excel data
+                    device_id = str(int(float(emp['attendance_device_id'])))
+                    employee_cache[device_id] = emp['name']
+                    employees_with_device_id += 1
+                except (ValueError, TypeError):
+                    continue
+
+        print(f"[clean_daily_inout10] Total employees: {total_employees}")
+        print(f"[clean_daily_inout10] Employees with device ID: {employees_with_device_id}")
+        print(f"[clean_daily_inout10] Employee cache size: {len(employee_cache)}")
+
+        if len(employee_cache) > 0:
+            # Show sample mappings
+            sample_items = list(employee_cache.items())[:3]
+            print(f"[clean_daily_inout10] Sample mappings: {sample_items}")
+
+    except Exception as e:
+        print(f"[clean_daily_inout10] Warning: Could not load employee cache: {e}")
+        print(f"[clean_daily_inout10] Will use gate pass numbers directly")
+        employee_cache = {}
+
     df_raw = pd.read_excel(input_path, engine="openpyxl")
     print(f"[clean_daily_inout10] Loaded raw DataFrame shape: {df_raw.shape}")
 
-    required_cols = ["Date", "Employee ID", "Employee Name", "PRESENT", "IN Time Punch", "OUT Time Punch", "AWH", "OT", "SHIFT"]
+    required_cols = ["Date", "Employee ID", "Employee Name", "Status", "IN Time Punch", "OUT Time Punch", "AWH", "OT", "SHIFT"]
     missing = [c for c in required_cols if c not in df_raw.columns]
     if missing:
         raise ValueError(f"Missing required columns in input: {missing}")
 
     records = []
+    not_found_count = 0
     for _, row in df_raw.iterrows():
-        emp_id = row.get("Employee ID") if pd.notna(row.get("Employee ID")) else None
+        attendance_device_id = row.get("Employee ID") if pd.notna(row.get("Employee ID")) else None
         emp_name = str(row.get("Employee Name")).strip() if pd.notna(row.get("Employee Name")) else None
         att_date = row.get("Date")
         time_in = row.get("IN Time Punch")
@@ -142,7 +181,7 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
         work_hrs = _to_float_workhrs(work_hrs_val)
         ot_hrs = str(row.get("OT")).strip() if pd.notna(row.get("OT")) else None
         shift_raw = str(row.get("SHIFT")).strip() if pd.notna(row.get("SHIFT")) else "G"
-        status_raw = row.get("PRESENT")
+        status_raw = row.get("Status")
 
         # Map status
         status = map_status(status_raw)
@@ -151,7 +190,16 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
         if (pd.isna(time_in) and pd.isna(time_out) and pd.isna(work_hrs) and pd.isna(status_raw)):
             continue
 
-        employee_id = emp_id
+        # Look up employee ID from attendance device ID (gate pass number)
+        employee_id = None
+        if attendance_device_id:
+            device_id_str = str(int(attendance_device_id))
+            employee_id = employee_cache.get(device_id_str)
+            if not employee_id:
+                # Fallback: use the device ID as-is if lookup fails
+                employee_id = device_id_str
+                not_found_count += 1
+                print(f"⚠️  Gate Pass {device_id_str} NOT found in Frappe - Using gate pass as Employee ID (Employee: {emp_name})")
 
         in_time_fmt = format_datetime(att_date, time_in)
         out_time_fmt = format_datetime(att_date, time_out)
@@ -176,6 +224,9 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
     df_final = pd.DataFrame.from_records(records)
     df_final = df_final.dropna(subset=["Attendance Date", "Employee"], how="any")
     print(f"[clean_daily_inout10] Built final DataFrame with {len(df_final)} rows")
+
+    if not_found_count > 0:
+        print(f"[clean_daily_inout10] ⚠️  Warning: {not_found_count} attendance device IDs not found in Employee master")
 
     if df_final.empty:
         raise ValueError("No attendance records parsed from Daily In-Out report.")
