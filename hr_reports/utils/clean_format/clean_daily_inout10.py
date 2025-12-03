@@ -10,7 +10,7 @@ def format_datetime(date_val, time_val):
         return None
 
     if not isinstance(date_val, (datetime, pd.Timestamp)):
-        date_val = pd.to_datetime(date_val, errors="coerce")
+        date_val = pd.to_datetime(date_val, dayfirst=True, errors="coerce")
     if pd.isna(date_val):
         return None
 
@@ -207,7 +207,7 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
         overtime_val = _calculate_overtime(work_hrs, shift)
 
         rec = {
-            "Attendance Date": pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
+            "Attendance Date": pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
             "Employee": employee_id if employee_id else "",
             "Employee Name": emp_name,
             "Status": status,
