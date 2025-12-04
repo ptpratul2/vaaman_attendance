@@ -5,6 +5,42 @@ import frappe
 from datetime import datetime, timedelta
 from typing import Optional
 
+# =========================
+#  .xls -> .xlsx conversion
+# =========================
+def convert_xls_to_xlsx(xls_path: str) -> str:
+    """Convert .xls file to .xlsx using xlrd and openpyxl."""
+    import xlrd
+    from openpyxl import Workbook
+    import tempfile
+
+    print(f"[clean_daily_inout10] Converting .xls to .xlsx: {xls_path}")
+
+    try:
+        book = xlrd.open_workbook(xls_path, formatting_info=False)
+        sheet = book.sheet_by_index(0)
+        wb = Workbook()
+        ws = wb.active
+
+        for r in range(sheet.nrows):
+            for c in range(sheet.ncols):
+                val = sheet.cell_value(r, c)
+                if sheet.cell_type(r, c) == xlrd.XL_CELL_DATE:
+                    try:
+                        val = xlrd.xldate_as_datetime(val, book.datemode)
+                    except Exception:
+                        pass
+                ws.cell(row=r + 1, column=c + 1).value = val
+
+        tmp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx").name
+        wb.save(tmp_path)
+        print(f"[clean_daily_inout10] Saved temporary .xlsx: {tmp_path}")
+        return tmp_path
+    except Exception as e:
+        print(f"[clean_daily_inout10] XLS conversion failed: {str(e)[:100]}")
+        return None
+
+
 def format_datetime(date_val, time_val):
     if pd.isna(date_val):
         return None
@@ -41,6 +77,38 @@ def format_datetime(date_val, time_val):
 
     return date_val.strftime("%Y-%m-%d") + f" {hours:02d}:{minutes:02d}:{seconds:02d}"
 
+def calculate_working_hours(intime_str: str, outtime_str: str) -> tuple:
+    """
+    Calculate working hours from intime and outtime strings.
+    Returns: (decimal_hours, total_hours)
+
+    Logic from clean_daily_inout7.py
+    """
+    if not intime_str or not outtime_str:
+        return None, 0.0
+
+    try:
+        # Parse datetime strings (format: "YYYY-MM-DD HH:MM:SS")
+        intime_dt = datetime.strptime(intime_str, "%Y-%m-%d %H:%M:%S")
+        outtime_dt = datetime.strptime(outtime_str, "%Y-%m-%d %H:%M:%S")
+
+        # If outtime is earlier than intime, assume it's next day
+        if outtime_dt < intime_dt:
+            outtime_dt += timedelta(days=1)
+
+        # Calculate difference
+        diff = outtime_dt - intime_dt
+        total_seconds = diff.total_seconds()
+        hours = total_seconds / 3600
+
+        # Format as decimal (e.g., 8.50)
+        decimal_hours = round(hours, 2)
+
+        return decimal_hours, hours
+    except Exception as e:
+        print(f"[clean_daily_inout10] Error calculating hours: {e}")
+        return None, 0.0
+
 def _to_float_workhrs(time_val):
     if not time_val or str(time_val).lower() in ["nan", "none"]:
         return 0.0
@@ -65,23 +133,33 @@ def _to_float_workhrs(time_val):
 
 
 
-def map_status(raw_status) -> str:
-    s = "" if pd.isna(raw_status) else str(raw_status).strip()
-    mapping = {
-        "P": "Present",
-        "PW": "Present",
-        "E": "Present",
-        "SPW": "Present",
-        "A": "Absent",
-        "HD": "Half Day",
-        "P/2": "Half Day",
-        "H": "Holiday",
-        "WO": "Holiday",
-        "0": "On Leave"
-    }
-    return mapping.get(s, s if s else "Absent")
+def determine_status(working_hours: float, total_hours: float) -> str:
+    """
+    Determine status based on working hours.
+    Logic from clean_daily_inout7.py:
+    - >= 7 hours: Present
+    - >= 4.5 hours: Half Day
+    - < 4.5 hours: Absent
+    """
+    if total_hours >= 7.0:
+        return "Present"
+    elif total_hours >= 4.5:
+        return "Half Day"
+    else:
+        return "Absent"
 
 def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
+    """
+    Detect shift with 1-hour grace period for late arrivals.
+
+    Shift timings with grace:
+    - Shift C (Night): 21:00 (9 PM) to 07:00 (7 AM) - includes 1hr grace
+    - Shift A (Day): 05:00 (5 AM) to 15:00 (3 PM) - includes 1hr grace
+    - Shift B (Evening): 13:00 (1 PM) to 23:00 (11 PM) - includes 1hr grace
+    - Shift G (General): Everything else or late entries
+
+    Priority: C > A > B > G (to handle overlaps)
+    """
     def get_hour(ts: Optional[str]) -> Optional[int]:
         if not ts or str(ts).strip() == "" or pd.isna(ts):
             return None
@@ -93,27 +171,48 @@ def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
     in_hour = get_hour(in_time)
     out_hour = get_hour(out_time)
 
+    # Use IN time primarily, fallback to OUT time
     hour = in_hour if in_hour is not None else out_hour
     if hour is None:
         return "G"
 
-    if 6 <= hour < 14:
-        return "A"
-    elif 14 <= hour < 22:
-        return "B"
-    elif hour >= 22 or hour < 6:
+    # Shift C (Night): 21:00-07:00 (with 1hr grace before/after)
+    # Check C first because night shift workers might punch late in morning
+    if hour >= 21 or hour <= 7:
         return "C"
+
+    # Shift A (Day): 05:00-15:00 (6 AM start + 1hr grace = 5-7, 2 PM end + 1hr = up to 3 PM)
+    # But exclude early morning (already handled by C)
+    elif 7 < hour < 15:
+        return "A"
+
+    # Shift B (Evening): 13:00-23:00 (2 PM start - 1hr = 1 PM, 10 PM end + 1hr = 11 PM)
+    # But exclude overlap with A (before 3 PM)
+    elif 15 <= hour < 21:
+        return "B"
+
+    # General shift for anything else
     return "G"
 
-def _calculate_overtime(work_hrs_val, shift):
-    default_shift_hrs = {"A": 8, "B": 8, "C": 8, "G": 7}
-    shift_hrs = default_shift_hrs.get(str(shift).upper(), 0)
+def calculate_overtime(working_hours: float) -> str:
+    """
+    Calculate overtime based on working hours.
+    Logic from clean_daily_inout7.py:
+    - All shifts considered as 9 hours
+    - OT = Working Hours - 9
+    - If OT is negative or less than 1 hour, return blank
+    """
+    if working_hours <= 0:
+        return ""
 
-    work_float = work_hrs_val if isinstance(work_hrs_val, (int, float)) else _to_float_workhrs(work_hrs_val)
-    overtime_val = round(work_float - shift_hrs - 0.60, 2)
+    shift_hrs = 9  # All shifts are 9 hours
+    overtime = round(working_hours - shift_hrs, 2)
 
-    # Skip negative OT values (make blank cell)
-    return "" if overtime_val < 0 else overtime_val
+    # If OT is negative or less than 1 hour, return blank
+    if overtime < 1:
+        return ""
+
+    return overtime
 
 
 def clean_daily_inout10(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
@@ -127,8 +226,10 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     # Build employee lookup cache: attendance_device_id -> employee_name
+    # Also build reverse cache: employee_name -> employee_name (for direct ID lookup)
     print("[clean_daily_inout10] Building employee lookup cache...")
     employee_cache = {}
+    employee_id_cache = {}  # New: Maps Employee ID (V43437) to itself
     try:
         # Try without status filter first to get all employees
         employees = frappe.get_all('Employee',
@@ -138,6 +239,9 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
         employees_with_device_id = 0
 
         for emp in employees:
+            # Cache by Employee ID (e.g., V43437 -> V43437)
+            employee_id_cache[emp['name']] = emp['name']
+
             if emp.get('attendance_device_id'):
                 try:
                     # Store as string to match with Excel data
@@ -150,21 +254,38 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
         print(f"[clean_daily_inout10] Total employees: {total_employees}")
         print(f"[clean_daily_inout10] Employees with device ID: {employees_with_device_id}")
         print(f"[clean_daily_inout10] Employee cache size: {len(employee_cache)}")
+        print(f"[clean_daily_inout10] Employee ID cache size: {len(employee_id_cache)}")
 
         if len(employee_cache) > 0:
             # Show sample mappings
             sample_items = list(employee_cache.items())[:3]
-            print(f"[clean_daily_inout10] Sample mappings: {sample_items}")
+            print(f"[clean_daily_inout10] Sample gate pass mappings: {sample_items}")
 
     except Exception as e:
         print(f"[clean_daily_inout10] Warning: Could not load employee cache: {e}")
         print(f"[clean_daily_inout10] Will use gate pass numbers directly")
         employee_cache = {}
+        employee_id_cache = {}
 
-    df_raw = pd.read_excel(input_path, engine="openpyxl")
+    # Handle .xls to .xlsx conversion if needed
+    working_file = input_path
+    temp_created = False
+
+    if input_path.lower().endswith(".xls"):
+        xlsx_path = convert_xls_to_xlsx(input_path)
+        if xlsx_path:
+            working_file = xlsx_path
+            temp_created = True
+            print(f"[clean_daily_inout10] Using converted .xlsx file: {working_file}")
+        else:
+            print(f"[clean_daily_inout10] Conversion failed, will try reading as-is")
+
+    df_raw = pd.read_excel(working_file, engine="openpyxl")
     print(f"[clean_daily_inout10] Loaded raw DataFrame shape: {df_raw.shape}")
 
-    required_cols = ["Date", "Employee ID", "Employee Name", "Status", "IN Time Punch", "OUT Time Punch", "AWH", "OT", "SHIFT"]
+    # Only require Date, Employee ID, Employee Name, and punch times
+    # We will calculate Status, AWH, OT, SHIFT ourselves
+    required_cols = ["Date", "Employee ID", "Employee Name", "IN Time Punch", "OUT Time Punch"]
     missing = [c for c in required_cols if c not in df_raw.columns]
     if missing:
         raise ValueError(f"Missing required columns in input: {missing}")
@@ -177,38 +298,72 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
         att_date = row.get("Date")
         time_in = row.get("IN Time Punch")
         time_out = row.get("OUT Time Punch")
-        work_hrs_val = row.get("AWH")  # keep as datetime or float
-        work_hrs = _to_float_workhrs(work_hrs_val)
-        ot_hrs = str(row.get("OT")).strip() if pd.notna(row.get("OT")) else None
-        shift_raw = str(row.get("SHIFT")).strip() if pd.notna(row.get("SHIFT")) else "G"
-        status_raw = row.get("Status")
 
-        # Map status
-        status = map_status(status_raw)
-
-        # Skip empty rows
-        if (pd.isna(time_in) and pd.isna(time_out) and pd.isna(work_hrs) and pd.isna(status_raw)):
+        # Skip empty rows (no punch data)
+        if pd.isna(time_in) and pd.isna(time_out):
             continue
 
-        # Look up employee ID from attendance device ID (gate pass number)
+        # Look up employee ID from attendance device ID (gate pass number) or Employee ID
         employee_id = None
         if attendance_device_id:
-            device_id_str = str(int(attendance_device_id))
-            employee_id = employee_cache.get(device_id_str)
-            if not employee_id:
-                # Fallback: use the device ID as-is if lookup fails
-                employee_id = device_id_str
-                not_found_count += 1
-                print(f"⚠️  Gate Pass {device_id_str} NOT found in Frappe - Using gate pass as Employee ID (Employee: {emp_name})")
+            # First, try as numeric gate pass number
+            try:
+                device_id_str = str(int(float(attendance_device_id)))
+                employee_id = employee_cache.get(device_id_str)
+                if employee_id:
+                    # Found by gate pass number
+                    pass
+                else:
+                    # Not found by gate pass - use as-is
+                    employee_id = device_id_str
+                    not_found_count += 1
+                    print(f"⚠️  Gate Pass {device_id_str} NOT found in Frappe - Using gate pass as Employee ID (Employee: {emp_name})")
+            except (ValueError, TypeError):
+                # Not a numeric gate pass - maybe it's an Employee ID (like V43437)?
+                attendance_device_id_str = str(attendance_device_id).strip()
+                if attendance_device_id_str in employee_id_cache:
+                    # Found by Employee ID!
+                    employee_id = employee_id_cache[attendance_device_id_str]
+                    print(f"✓ Using Frappe Employee ID directly: {employee_id} ({emp_name})")
+                else:
+                    print(f"⚠️  Invalid Employee ID: {attendance_device_id} (Employee: {emp_name}) - Not found in Frappe")
+        else:
+            print(f"⚠️  No Employee ID in source Excel for: {emp_name} on {att_date}")
 
+        # Format IN and OUT times
         in_time_fmt = format_datetime(att_date, time_in)
         out_time_fmt = format_datetime(att_date, time_out)
-        shift = shift_raw if shift_raw else detect_shift(in_time_fmt, out_time_fmt)
-        overtime_val = _calculate_overtime(work_hrs, shift)
+
+        # Calculate working hours from punch times
+        if in_time_fmt and out_time_fmt:
+            calc_work_hrs, total_hours = calculate_working_hours(in_time_fmt, out_time_fmt)
+
+            if calc_work_hrs is not None:
+                work_hrs = calc_work_hrs
+                # Determine status based on calculated hours
+                status = determine_status(work_hrs, total_hours)
+            else:
+                work_hrs = ""
+                status = "Absent"
+        else:
+            # Missing punch time - mark as Absent with blank hours
+            work_hrs = ""
+            status = "Absent"
+
+        # Auto-detect shift from punch times
+        shift = detect_shift(in_time_fmt, out_time_fmt)
+
+        # Calculate overtime
+        overtime_val = calculate_overtime(work_hrs) if (work_hrs and work_hrs > 0) else ""
+
+        # Skip rows without Employee ID - cannot import without it
+        if not employee_id:
+            print(f"⚠️  SKIPPING row without Employee ID: {emp_name} on {att_date}")
+            continue
 
         rec = {
             "Attendance Date": pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
-            "Employee": employee_id if employee_id else "",
+            "Employee": employee_id,
             "Employee Name": emp_name,
             "Status": status,
             "In Time": in_time_fmt,
@@ -237,6 +392,12 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
 
     df_final.to_excel(output_path, index=False)
     print(f"[clean_daily_inout10] Saved output to: {output_path}")
+
+    # Cleanup temporary file if created
+    if temp_created and os.path.exists(working_file):
+        os.unlink(working_file)
+        print(f"[clean_daily_inout10] Cleaned up temporary file")
+
     print("[clean_daily_inout10] Done ✅")
 
     return df_final
