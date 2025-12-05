@@ -10,6 +10,7 @@ from hr_reports.utils.clean_format.clean_daily_inout4 import clean_daily_inout4
 from hr_reports.utils.clean_format.clean_daily_inout13 import clean_daily_inout13
 from hr_reports.utils.clean_format.clean_daily_inout11 import clean_daily_inout11
 from hr_reports.utils.clean_format.clean_daily_inout10 import clean_daily_inout10
+from hr_reports.utils.clean_format.clean_daily_inout2 import clean_daily_inout2
 from hr_reports.utils.clean_format.clean_daily_inout29 import clean_daily_inout29
 from hr_reports.utils.clean_format.clean_daily_inout7 import clean_daily_inout7
 from hr_reports.utils.clean_format.clean_daily_inout7_1 import clean_daily_inout7_1
@@ -373,6 +374,15 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout10 for Balco")
+
+        elif doc.branch in ["STL Jharsuguda"]:
+            clean_daily_inout2(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout2 for Jharsuguda")
 
         elif doc.branch in ["PARADIP", "JSW Paradeep"]:
             clean_daily_inout29(
