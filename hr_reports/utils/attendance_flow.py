@@ -11,11 +11,13 @@ from hr_reports.utils.clean_format.clean_daily_inout13 import clean_daily_inout1
 from hr_reports.utils.clean_format.clean_daily_inout11 import clean_daily_inout11
 from hr_reports.utils.clean_format.clean_daily_inout10 import clean_daily_inout10
 from hr_reports.utils.clean_format.clean_daily_inout2 import clean_daily_inout2
+from hr_reports.utils.clean_format.clean_daily_inout12 import clean_daily_inout12
 from hr_reports.utils.clean_format.clean_daily_inout29 import clean_daily_inout29
 from hr_reports.utils.clean_format.clean_daily_inout7 import clean_daily_inout7
 from hr_reports.utils.clean_format.clean_daily_inout7_1 import clean_daily_inout7_1
 from hr_reports.utils.clean_format.clean_daily_inout7_2 import clean_daily_inout7_2
 from frappe.core.doctype.data_import.data_import import start_import
+
 
 
 def append_log(doc, message):
@@ -410,6 +412,15 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout7 for Tata Angul")
+
+        elif doc.branch in ["JSW Jharsuguda"]:
+            clean_daily_inout12(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout12 for JSW Jharsuguda")
 
         elif doc.branch in ["Jsol Angul", "JSPL Angul Sinter O&M", "Jspl & Jsol angul", "JSPL Angul BF 2 JSOL - VEIL"]:
             clean_daily_inout7_2(
