@@ -402,7 +402,7 @@ def process_uploaded_file(doc, method):
                 company=doc.company,
                 branch=doc.branch
             )
-            append_log(doc, "Step 2: Used clean_daily_inout7 for Tata Angul")
+            append_log(doc, "Step 2: Used clean_daily_inout7 for Tata")
 
         elif doc.branch in ["Tata Angul"]:
             clean_daily_inout7_1(
@@ -420,7 +420,7 @@ def process_uploaded_file(doc, method):
                 company=doc.company,
                 branch=doc.branch
             )
-            append_log(doc, "Step 2: Used clean_daily_inout12 for JSW Jharsuguda")
+            append_log(doc, "Step 2: Use JSW Jharsugudad clean_daily_inout12 for JSW Jharsuguda")
 
         elif doc.branch in ["Jsol Angul", "JSPL Angul Sinter O&M", "Jspl & Jsol angul", "JSPL Angul BF 2 JSOL - VEIL"]:
             clean_daily_inout7_2(
