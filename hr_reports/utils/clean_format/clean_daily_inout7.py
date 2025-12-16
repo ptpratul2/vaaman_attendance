@@ -137,16 +137,26 @@ def parse_html_punch_report(file_path: str) -> pd.DataFrame:
 
 
 def extract_date_from_filename(filename: str) -> Optional[str]:
-    """Extract date from filename like 'PunchReport 02.10.2025.xls' -> '2025-10-02'"""
+    """Extract date from filename like 'PunchReport 02.10.2025.xls' -> '2025-10-02' or 'PunchReport 01.12.25.xls' -> '2025-12-01'"""
     import re
 
-    # Pattern: DD.MM.YYYY
-    pattern = r'(\d{2})\.(\d{2})\.(\d{4})'
-    match = re.search(pattern, filename)
+    # Pattern 1: DD.MM.YYYY (4-digit year)
+    pattern_4digit = r'(\d{2})\.(\d{2})\.(\d{4})'
+    match = re.search(pattern_4digit, filename)
 
     if match:
         day, month, year = match.groups()
         return f"{year}-{month}-{day}"
+
+    # Pattern 2: DD.MM.YY (2-digit year)
+    pattern_2digit = r'(\d{2})\.(\d{2})\.(\d{2})'
+    match = re.search(pattern_2digit, filename)
+
+    if match:
+        day, month, year = match.groups()
+        # Convert 2-digit year to 4-digit (assumes 2000s)
+        full_year = f"20{year}"
+        return f"{full_year}-{month}-{day}"
 
     return None
 
