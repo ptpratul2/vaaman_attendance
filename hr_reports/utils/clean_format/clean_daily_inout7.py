@@ -321,12 +321,22 @@ def clean_daily_inout7(input_path: str, output_path: str, company: str = None, b
             print("[clean_daily_inout7] WARNING: Could not extract date from filename, using today")
             attendance_date = datetime.now().strftime("%Y-%m-%d")
 
-    # Step 1: Try to convert .xls to .xlsx, if that fails, parse as HTML
+    # Step 1: Try to load the file based on its extension
     working_file = input_path
     temp_created = False
     df_raw = None
 
-    if input_path.lower().endswith(".xls"):
+    # Handle real .xlsx files first
+    if input_path.lower().endswith(".xlsx"):
+        try:
+            df_raw = pd.read_excel(input_path, engine="openpyxl")
+            print(f"[clean_daily_inout7] Successfully loaded .xlsx file")
+        except Exception as e:
+            print(f"[clean_daily_inout7] Could not read .xlsx as Excel, will try HTML parsing: {str(e)[:100]}")
+            df_raw = None
+
+    # Handle .xls files (convert to .xlsx or parse as HTML)
+    elif input_path.lower().endswith(".xls"):
         xlsx_path = convert_xls_to_xlsx(input_path)
         if xlsx_path:
             working_file = xlsx_path
