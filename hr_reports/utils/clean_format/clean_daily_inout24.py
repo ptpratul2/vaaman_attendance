@@ -3,6 +3,8 @@ import os
 import pandas as pd
 import frappe
 from datetime import datetime, timedelta, time
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 
 def clean_daily_inout24(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
     print("=" * 80)
@@ -71,14 +73,16 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
         except Exception:
             return 0.0
 
-    def detect_shift_from_checkin(checkin_time_str, att_date):
+    def detect_shift_from_checkin(checkin_time_str, att_date, find_nearest=False):
         """
         Detect shift based on check-in time
-        Shift definitions:
-        - A shift: 6 AM to 2 PM (check-in 5:30 AM to 2 PM)
-        - B shift: 2 PM to 10 PM (check-in 1:30 PM to 10 PM)
-        - C shift: 10 PM to 6 AM (check-in 9:30 PM to 6 AM next day)
-        - G shift: 9 AM to 5:30 PM (check-in 8:30 AM to 5:30 PM)
+        Shift definitions (punch-in time windows):
+        - A shift: punch between 5-7 (05:00 to 07:00)
+        - G shift: punch between 8-10 (08:00 to 10:00)
+        - B shift: punch between 13-15 (13:00 to 15:00)
+        - C shift: punch between 21-23 (21:00 to 23:00)
+
+        If find_nearest=True, returns the nearest shift when outside windows
         """
         if not checkin_time_str or not att_date:
             return None
@@ -94,44 +98,56 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             date_obj = pd.to_datetime(att_date).date()
             checkin_datetime = datetime.combine(date_obj, checkin_time)
 
-            # Shift definitions with 30-minute buffer before start
-            # C shift: 10 PM to 6 AM next day (9:30 PM to 5:30 AM next day) - spans midnight
-            # Note: C shift ends at 5:30 AM (30 min before A shift starts at 6 AM)
-            c_start = datetime.combine(date_obj, time(21, 30))
-            c_end = datetime.combine(date_obj + timedelta(days=1), time(5, 30))
+            # Shift definitions based on punch-in time windows:
+            # A shift: punch between 5-7 (05:00 to 07:00)
+            # G shift: punch between 8-10 (08:00 to 10:00)
+            # B shift: punch between 13-15 (13:00 to 15:00)
+            # C shift: punch between 21-23 (21:00 to 23:00)
 
-            # G shift: 9 AM to 5:30 PM (8:30 AM to 5:30 PM)
-            g_start = datetime.combine(date_obj, time(8, 30))
-            g_end = datetime.combine(date_obj, time(17, 30))
+            a_start = datetime.combine(date_obj, time(5, 0))
+            a_end = datetime.combine(date_obj, time(7, 0))
 
-            # A shift: 6 AM to 2 PM (5:30 AM to 2 PM)
-            a_start = datetime.combine(date_obj, time(5, 30))
-            a_end = datetime.combine(date_obj, time(14, 0))
+            g_start = datetime.combine(date_obj, time(8, 0))
+            g_end = datetime.combine(date_obj, time(10, 0))
 
-            # B shift: 2 PM to 10 PM (1:30 PM to 10 PM)
-            b_start = datetime.combine(date_obj, time(13, 30))
-            b_end = datetime.combine(date_obj, time(22, 0))
+            b_start = datetime.combine(date_obj, time(13, 0))
+            b_end = datetime.combine(date_obj, time(15, 0))
+
+            c_start = datetime.combine(date_obj, time(21, 0))
+            c_end = datetime.combine(date_obj, time(23, 0))
 
             # Check which shift the check-in time falls into
-            # Priority order: C (night shift), G, A, B
-            
-            # Handle C shift (spans midnight - 9:30 PM to 5:30 AM next day)
-            if checkin_datetime >= c_start:
-                return "C"
-            elif checkin_datetime < datetime.combine(date_obj, time(5, 30)):
-                return "C"
-            # Check G shift (8:30 AM to 5:30 PM) - overlaps with A and B, check first
+            if a_start <= checkin_datetime <= a_end:
+                return "A"
             elif g_start <= checkin_datetime <= g_end:
                 return "G"
-            # Check A shift (5:30 AM to 2 PM, excluding G shift range)
-            elif a_start <= checkin_datetime <= a_end:
-                return "A"
-            # Check B shift (1:30 PM to 10 PM, excluding G shift range)
             elif b_start <= checkin_datetime <= b_end:
                 return "B"
+            elif c_start <= checkin_datetime <= c_end:
+                return "C"
             else:
-                # Default to A shift if no match (fallback)
-                return "A"
+                # If outside all windows
+                if find_nearest:
+                    # Find nearest shift based on time
+                    # A center: 6:00, G center: 9:00, B center: 14:00, C center: 22:00
+                    a_center = datetime.combine(date_obj, time(6, 0))
+                    g_center = datetime.combine(date_obj, time(9, 0))
+                    b_center = datetime.combine(date_obj, time(14, 0))
+                    c_center = datetime.combine(date_obj, time(22, 0))
+
+                    # Calculate distances
+                    distances = {
+                        "A": abs((checkin_datetime - a_center).total_seconds()),
+                        "G": abs((checkin_datetime - g_center).total_seconds()),
+                        "B": abs((checkin_datetime - b_center).total_seconds()),
+                        "C": abs((checkin_datetime - c_center).total_seconds())
+                    }
+
+                    # Return nearest shift
+                    nearest = min(distances, key=distances.get)
+                    return nearest
+                else:
+                    return None
 
         except Exception as e:
             print(f"[clean_daily_inout24] Error detecting shift: {e}")
@@ -228,13 +244,47 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
         outtime_str = outtime_dt.strftime("%Y-%m-%d %H:%M:%S") if outtime_dt else ""
 
         # ------------------------
+        # Store original shift from Excel for fallback
+        # ------------------------
+        original_shift = shift
+
+        # ------------------------
+        # Handle "N" shift - auto-detect actual shift from punch time
+        # ------------------------
+        if shift and shift.upper() == "N":
+            print(f"[clean_daily_inout24] Shift 'N' detected for {emp_name} - will auto-detect shift from punch time")
+            if intime_dt:
+                # Try to detect shift from punch time
+                detected_shift = detect_shift_from_checkin(intime_raw, att_date, find_nearest=False)
+                if detected_shift:
+                    shift = detected_shift
+                    print(f"[clean_daily_inout24] Auto-detected shift '{shift}' for {emp_name} with check-in {intime_str}")
+                else:
+                    # If outside windows, find nearest shift
+                    nearest_shift = detect_shift_from_checkin(intime_raw, att_date, find_nearest=True)
+                    if nearest_shift:
+                        shift = nearest_shift
+                        print(f"[clean_daily_inout24] Assigned nearest shift '{shift}' for {emp_name} (punch outside windows)")
+                    else:
+                        shift = ""
+            else:
+                shift = ""  # No punch time, clear shift
+
+        # ------------------------
         # Auto-detect shift if blank
         # ------------------------
-        if not shift and intime_dt:
-            detected_shift = detect_shift_from_checkin(intime_raw, att_date)
+        elif not shift and intime_dt:
+            detected_shift = detect_shift_from_checkin(intime_raw, att_date, find_nearest=False)
             if detected_shift:
                 shift = detected_shift
-                print(f"[clean_daily_inout24] Auto-detected shift '{shift}' for check-in {intime_str}")
+                print(f"[clean_daily_inout24] Auto-detected shift '{shift}' for {emp_name} with check-in {intime_str}")
+            else:
+                # If outside windows, keep original shift from Excel (if not "N")
+                if original_shift and original_shift.upper() != "N":
+                    shift = original_shift
+                    print(f"[clean_daily_inout24] Using original shift '{shift}' from Excel (punch outside detection windows)")
+                else:
+                    shift = ""
 
         # ------------------------
         # Map Gate Pass → Employee ID
@@ -271,6 +321,46 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             status = "Absent"
             working_hours_float = 0.0
 
+        # ------------------------
+        # Final rule: If working hours = 0 or status = "Absent", clear shift
+        # ------------------------
+        if working_hours_float == 0.0 or status == "Absent":
+            if shift:
+                print(f"[clean_daily_inout24] Clearing shift '{shift}' for {emp_name} (Working Hours: {working_hours_float}, Status: {status})")
+            shift = ""
+
+        # ------------------------
+        # Don't show working hours if 0 or negative
+        # ------------------------
+        display_working_hours = working_hours_float if working_hours_float > 0 else ""
+
+        # ------------------------
+        # Don't show overtime if 0 or negative
+        # Fix malformed values like "9.-7" → "9.00"
+        # ------------------------
+        display_overtime = ""
+        if over_time:
+            try:
+                overtime_str = str(over_time).strip()
+                if overtime_str and overtime_str not in ["0", "0.0", "0.00", ""]:
+                    # If minutes part is negative (like "9.-7"), treat minutes as 0
+                    if ".-" in overtime_str:
+                        hours_part = overtime_str.split(".-")[0]
+                        overtime_str = f"{hours_part}.00"
+
+                    # Now check if positive
+                    if "." in overtime_str or ":" in overtime_str:
+                        parts = overtime_str.replace(":", ".").split(".")
+                        hours = int(parts[0]) if parts[0] and parts[0] not in ['-', ''] else 0
+                        minutes = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                        # Show only if positive
+                        if hours > 0 or minutes > 0:
+                            display_overtime = f"{hours}.{minutes:02d}" if minutes else str(hours)
+                    elif float(overtime_str) > 0:
+                        display_overtime = overtime_str
+            except Exception:
+                display_overtime = ""
+
         rec = {
             "Attendance Date": att_date,
             "Employee": employee_id if employee_id else "",
@@ -280,9 +370,9 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
             "Out Time": outtime_str,  # Datetime format for ERPNext
             "Company": company if company else "",
             "Branch": branch if branch else "",
-            "Working Hours": working_hours_float,
+            "Working Hours": display_working_hours,
             "Shift": shift if shift else "",
-            "Over Time": over_time
+            "Over Time": display_overtime
         }
         records.append(rec)
 
@@ -301,6 +391,39 @@ def clean_daily_inout24(input_path: str, output_path: str, company: str = None, 
 
     df_final.to_excel(output_path, index=False)
     print(f"[clean_daily_inout24] Saved output to: {output_path}")
+
+    # Apply Excel formatting: black out cells where working hours < 0
+    try:
+        wb = load_workbook(output_path)
+        ws = wb.active
+
+        # Find the Working Hours column index
+        working_hours_col = None
+        for col_idx, cell in enumerate(ws[1], start=1):
+            if cell.value == "Working Hours":
+                working_hours_col = col_idx
+                break
+
+        if working_hours_col:
+            black_fill = PatternFill(start_color="000000", end_color="000000", fill_type="solid")
+
+            # Iterate through rows (skip header)
+            for row_idx in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row_idx, column=working_hours_col)
+                if cell.value is not None:
+                    try:
+                        value = float(cell.value)
+                        if value < 0:
+                            cell.fill = black_fill
+                            print(f"[clean_daily_inout24] Blacked out cell at row {row_idx} (Working Hours: {value})")
+                    except (ValueError, TypeError):
+                        pass  # Skip non-numeric values
+
+            wb.save(output_path)
+            print(f"[clean_daily_inout24] Applied cell formatting for negative working hours")
+    except Exception as e:
+        print(f"[clean_daily_inout24] Warning: Could not apply Excel formatting: {e}")
+
     print("[clean_daily_inout24] Done ✅")
 
     return df_final
