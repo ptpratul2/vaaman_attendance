@@ -318,7 +318,7 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
         # Map to Employee using priority order:
         # 1. Primary: Search by Attendance Device ID (from "Employee ID" column)
         # 2. Secondary: Search by VEIL CODE
-        # 3. Tertiary: Use VEIL CODE as-is
+        # If not found, SKIP this employee
         employee_id = None
         device_id_str = str(employee_id_device).strip() if pd.notna(employee_id_device) else None
         veil_code_str = str(veil_code).strip() if pd.notna(veil_code) else None
@@ -333,17 +333,12 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
             employee_id = employee_cache_by_veil[veil_code_str]
             # print(f"[clean_daily_inout12] ✓ Found employee by VEIL CODE {veil_code_str}: {employee_id}")
 
-        # TERTIARY: Use VEIL CODE as-is (fallback for employees not in cache)
-        elif veil_code_str:
-            employee_id = veil_code_str
+        # If employee not found in ERPNext, skip this employee block
+        if not employee_id:
             employees_not_found += 1
-            print(f"[clean_daily_inout12] ⚠ Employee not found in cache - using VEIL CODE as-is: {veil_code_str} (Device ID: {device_id_str}) for {emp_name}")
-
-        # LAST RESORT: Use Device ID if nothing else works
-        else:
-            employee_id = device_id_str
-            employees_not_found += 1
-            print(f"[clean_daily_inout12] ⚠ No VEIL CODE - using Device ID as-is: {device_id_str} for {emp_name}")
+            print(f"[clean_daily_inout12] ⚠ Employee not found - SKIPPING: VEIL CODE={veil_code_str}, Device ID={device_id_str}, Name={emp_name}")
+            i += 7  # Skip to next employee block
+            continue
 
         # Process each day (columns 1-30)
         for day in range(1, 31):
