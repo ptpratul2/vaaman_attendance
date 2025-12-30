@@ -13,7 +13,7 @@ def format_datetime(date_val, time_val):
 
     # Normalize date
     if not isinstance(date_val, (datetime, pd.Timestamp)):
-        date_val = pd.to_datetime(date_val, errors="coerce")
+        date_val = pd.to_datetime(date_val, dayfirst=True, errors="coerce")
     if pd.isna(date_val):
         return None
 
@@ -360,6 +360,11 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
         gp_no = str(row.get("GP No")).strip() if pd.notna(row.get("GP No")) else None
         emp_name = str(row.get("Name")).strip() if pd.notna(row.get("Name")) else None
         att_date = row.get("Date In")
+
+        # DEBUG: Print first 5 raw dates from Excel
+        if idx < 5:
+            print(f"[DEBUG] Row {idx}: Raw 'Date In' from Excel: {repr(att_date)} (type: {type(att_date).__name__})")
+
         time_in = row.get("Time In")
         time_out = row.get("Time Out")
         work_hrs = str(row.get("Working Hours")).strip() if pd.notna(row.get("Working Hours")) else None
@@ -390,11 +395,11 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
             try:
                 # Try to calculate from in/out times
                 in_dt = parse_time_to_datetime(
-                    pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
+                    pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
                     in_time_fmt
                 )
                 out_dt = parse_time_to_datetime(
-                    pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
+                    pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
                     out_time_fmt
                 )
                 if in_dt and out_dt:
@@ -421,8 +426,15 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
         # Overtime calculation (using decimal hours)
         overtime_val = _calculate_overtime_from_seconds(work_hrs_decimal * 3600) if work_hrs_decimal > 0 else ""
 
+        # Parse attendance date
+        parsed_date = pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else ""
+
+        # DEBUG: Print first 5 parsed dates
+        if idx < 5:
+            print(f"[DEBUG] Row {idx}: Parsed 'Attendance Date': {parsed_date}")
+
         rec = {
-            "Attendance Date": pd.to_datetime(att_date).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
+            "Attendance Date": parsed_date,
             "Employee": employee_id if employee_id else "",
             "Employee Name": emp_name,
             "Status": status,
