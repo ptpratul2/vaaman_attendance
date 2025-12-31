@@ -16,6 +16,7 @@ from hr_reports.utils.clean_format.clean_daily_inout29 import clean_daily_inout2
 from hr_reports.utils.clean_format.clean_daily_inout7 import clean_daily_inout7
 from hr_reports.utils.clean_format.clean_daily_inout7_1 import clean_daily_inout7_1
 from hr_reports.utils.clean_format.clean_daily_inout7_2 import clean_daily_inout7_2
+from hr_reports.utils.clean_format.clean_daily_inout15 import clean_daily_inout15
 from frappe.core.doctype.data_import.data_import import start_import
 
 
@@ -430,6 +431,49 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout7 for Tata jspl & jsol Angul")
+
+        elif doc.branch in ["hindalco lapanga", "Hindalco Lapanga", "HINDALCO LAPANGA"]:
+            append_log(doc, "Step 2: Starting clean_daily_inout15 (Scrum Report format) for Hindalco Lapanga")
+            try:
+                import sys
+                from io import StringIO
+
+                # Capture stdout to log it
+                old_stdout = sys.stdout
+                sys.stdout = captured_output = StringIO()
+
+                clean_daily_inout15(
+                    input_path=local_path,
+                    output_path=cleaned_path,
+                    company=doc.company,
+                    branch=doc.branch
+                )
+
+                # Restore stdout and log captured output
+                sys.stdout = old_stdout
+                output = captured_output.getvalue()
+
+                # Log the debug output
+                for line in output.split('\n'):
+                    if line.strip():
+                        append_log(doc, f"  {line}")
+
+                append_log(doc, "Step 2: ✅ Clean completed successfully")
+
+            except Exception as e:
+                # Restore stdout
+                sys.stdout = old_stdout
+
+                # Log any captured output before the error
+                output = captured_output.getvalue()
+                if output:
+                    append_log(doc, "  Debug output before error:")
+                    for line in output.split('\n')[-50:]:  # Last 50 lines
+                        if line.strip():
+                            append_log(doc, f"  {line}")
+
+                append_log(doc, f"❌ Error in clean_daily_inout15: {str(e)}")
+                raise
 
         else:
             clean_crystal_excel(
