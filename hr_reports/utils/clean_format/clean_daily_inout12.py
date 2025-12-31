@@ -50,8 +50,7 @@ def parse_time_value(time_val) -> Optional[datetime]:
             return datetime.min.time().replace(hour=hour, minute=minute)
 
         return None
-    except Exception as e:
-        print(f"[clean_daily_inout12] Error parsing time {time_val}: {e}")
+    except Exception:
         return None
 
 
@@ -66,8 +65,7 @@ def format_datetime(date_obj: datetime, time_obj) -> Optional[str]:
 
         combined = datetime.combine(date_obj.date(), time_obj)
         return combined.strftime("%Y-%m-%d %H:%M:%S")
-    except Exception as e:
-        print(f"[clean_daily_inout12] Error formatting datetime: {e}")
+    except Exception:
         return None
 
 
@@ -97,8 +95,7 @@ def calculate_working_hours(intime_str: str, outtime_str: str) -> tuple:
         decimal_hours = round(hours, 2)
 
         return decimal_hours, hours
-    except Exception as e:
-        print(f"[clean_daily_inout12] Error calculating hours: {e}")
+    except Exception:
         return None, 0.0
 
 
@@ -219,47 +216,29 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
 
     Returns cleaned DataFrame ready for ERPNext import.
     """
-    print("=" * 80)
-    print("[clean_daily_inout12] Starting Monthly Punching Report Cleaning")
-    print(f"[clean_daily_inout12] Input: {input_path}")
-    print(f"[clean_daily_inout12] Output: {output_path}")
-    print(f"[clean_daily_inout12] Company: {company}")
-    print(f"[clean_daily_inout12] Branch: {branch}")
-    print("=" * 80)
+    # Silent processing - minimal logs
 
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    # Build employee lookup cache: Device ID -> employee record, VEIL CODE -> employee record
-    print("[clean_daily_inout12] Building employee lookup cache...")
+    # Build employee lookup cache
     employee_cache_by_veil = {}
     employee_cache_by_device = {}
     try:
         employees = frappe.get_all('Employee',
             fields=['name', 'employee_name', 'attendance_device_id']
         )
-        total_employees = len(employees)
-
         for emp in employees:
-            # Cache by Employee ID (VEIL CODE like V46536)
             employee_cache_by_veil[emp['name']] = emp['name']
-
-            # Also cache by Attendance Device ID (like A000044090, B000040098)
             if emp.get('attendance_device_id'):
                 device_id = str(emp['attendance_device_id']).strip()
                 employee_cache_by_device[device_id] = emp['name']
-
-        print(f"[clean_daily_inout12] Total employees in cache: {total_employees}")
-        print(f"[clean_daily_inout12] Employees with Device ID: {len(employee_cache_by_device)}")
-
-    except Exception as e:
-        print(f"[clean_daily_inout12] Warning: Could not load employee cache: {e}")
+    except Exception:
         employee_cache_by_veil = {}
         employee_cache_by_device = {}
 
     # Read Excel file
     df_raw = pd.read_excel(input_path, engine="openpyxl", header=0)
-    print(f"[clean_daily_inout12] Loaded raw DataFrame shape: {df_raw.shape}")
 
     # Get month and year from first data row
     month = None
@@ -270,13 +249,9 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
         year = int(first_row["For Year"]) if pd.notna(first_row["For Year"]) else None
 
     if not month or not year:
-        print("[clean_daily_inout12] WARNING: Could not extract month/year from file")
-        # Use current month/year as fallback
         today = datetime.today()
         month = today.month
         year = today.year
-
-    print(f"[clean_daily_inout12] Processing month: {year}-{month:02d}")
 
     # Process employee blocks (every 7 rows)
     records = []
@@ -323,22 +298,17 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
         device_id_str = str(employee_id_device).strip() if pd.notna(employee_id_device) else None
         veil_code_str = str(veil_code).strip() if pd.notna(veil_code) else None
 
-        # PRIMARY: Try to find by Attendance Device ID first (most reliable)
+        # PRIMARY: Try to find by Attendance Device ID first
         if device_id_str and device_id_str in employee_cache_by_device:
             employee_id = employee_cache_by_device[device_id_str]
-            # print(f"[clean_daily_inout12] ✓ Found employee by Device ID {device_id_str}: {employee_id}")
-
         # SECONDARY: If not found by device ID, try VEIL CODE
         elif veil_code_str and veil_code_str in employee_cache_by_veil:
             employee_id = employee_cache_by_veil[veil_code_str]
-            # print(f"[clean_daily_inout12] ✓ Found employee by VEIL CODE {veil_code_str}: {employee_id}")
 
-        # If employee not found in ERPNext, skip this employee block
+        # If employee not found, use placeholder for Data Import validation
         if not employee_id:
             employees_not_found += 1
-            print(f"[clean_daily_inout12] ⚠ Employee not found - SKIPPING: VEIL CODE={veil_code_str}, Device ID={device_id_str}, Name={emp_name}")
-            i += 7  # Skip to next employee block
-            continue
+            employee_id = veil_code_str if veil_code_str else device_id_str
 
         # Process each day (columns 1-30)
         for day in range(1, 31):
@@ -413,9 +383,10 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
         # Move to next employee block (7 rows)
         i += 7
 
-    print(f"[clean_daily_inout12] Employee blocks processed: {employee_blocks_found}")
-    print(f"[clean_daily_inout12] Employees not found in ERPNext: {employees_not_found}")
-    print(f"[clean_daily_inout12] Total records created: {len(records)}")
+    # Show warnings for missing employees only
+    if employees_not_found > 0:
+        print(f"⚠️  WARNING: {employees_not_found} employees not found in ERPNext")
+        print(f"Records created with placeholder IDs. Add employees then re-import.\n")
 
     if not records:
         raise ValueError("No attendance records parsed from Monthly Punching Report.")
@@ -427,8 +398,6 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
     df_final = df_final.dropna(subset=["Attendance Date", "Employee"], how="any")
     df_final = df_final[df_final['Employee'] != '']
 
-    print(f"[clean_daily_inout12] Final DataFrame shape: {df_final.shape}")
-
     if df_final.empty:
         raise ValueError("No valid attendance records after filtering.")
 
@@ -438,8 +407,5 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
         os.makedirs(out_dir, exist_ok=True)
 
     df_final.to_excel(output_path, index=False)
-    print(f"[clean_daily_inout12] Saved output to: {output_path}")
-    print("[clean_daily_inout12] Done ✅")
-    print("=" * 80)
 
     return df_final
