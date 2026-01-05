@@ -14,6 +14,7 @@ from hr_reports.utils.clean_format.clean_daily_inout2 import clean_daily_inout2
 from hr_reports.utils.clean_format.clean_daily_inout12 import clean_daily_inout12
 from hr_reports.utils.clean_format.clean_daily_inout29 import clean_daily_inout29
 from hr_reports.utils.clean_format.clean_daily_inout30 import clean_daily_inout30
+from hr_reports.utils.clean_format.clean_daily_inout30_2 import clean_daily_inout30_2
 from hr_reports.utils.clean_format.clean_daily_inout7 import clean_daily_inout7
 from hr_reports.utils.clean_format.clean_daily_inout7_1 import clean_daily_inout7_1
 from hr_reports.utils.clean_format.clean_daily_inout7_2 import clean_daily_inout7_2
@@ -390,6 +391,15 @@ def process_uploaded_file(doc, method):
 
         elif doc.branch in ["Bellari obp2"]:
             clean_daily_inout30(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout30 for PARADIP")
+
+        elif doc.branch in ["Bellari (JVML & STEEL)"]:
+            clean_daily_inout30_2(
                 input_path=local_path,
                 output_path=cleaned_path,
                 company=doc.company,
