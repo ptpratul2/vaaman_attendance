@@ -642,32 +642,33 @@ def cancel_uploaded_file(doc, method):
                 if total_count > 0:
                     # Process in batches using pagination
                     batch_size = 1000
-                    start = 0
-                    
-                    while start < total_count:
-                        # Get batch of attendance records
+                    batch_num = 0
+
+                    while True:
+                        # Get batch of attendance records (always from start since we're deleting)
                         attendances = frappe.get_all(
                             "Attendance",
                             filters={"custom_crystal_upload_ref": doc.name},
                             fields=["name", "docstatus"],
-                            limit_start=start,
+                            limit_start=0,  # Always query from 0 since records are being deleted
                             limit_page_length=batch_size,
                             order_by="name"
                         )
-                        
+
                         if not attendances:
                             break
-                        
-                        append_log(doc, f"Processing batch: {start + 1} to {min(start + batch_size, total_count)} of {total_count}")
-                        
+
+                        batch_num += 1
+                        append_log(doc, f"Processing batch {batch_num}: {len(attendances)} records (Total deleted so far: {deleted_count}/{total_count})")
+
                         for att in attendances:
                             try:
                                 # Check if document still exists
                                 if not frappe.db.exists("Attendance", att.name):
                                     continue
-                                
+
                                 att_doc = frappe.get_doc("Attendance", att.name)
-                                
+
                                 # Cancel if submitted
                                 if att_doc.docstatus == 1:
                                     try:
@@ -676,26 +677,26 @@ def cancel_uploaded_file(doc, method):
                                     except Exception as cancel_err:
                                         append_log(doc, f"⚠️ Could not cancel {att.name}: {str(cancel_err)[:200]}")
                                         # Continue to try deletion anyway
-                                
+
                                 # Delete the attendance
                                 frappe.delete_doc("Attendance", att.name, force=1, ignore_permissions=True)
                                 frappe.db.commit()
                                 deleted_count += 1
-                                
+
                                 if deleted_count % 100 == 0:  # Log progress every 100 records
                                     append_log(doc, f"Progress: Deleted {deleted_count}/{total_count} attendances...")
-                                    
+
                             except frappe.DoesNotExistError:
                                 # Already deleted, skip
                                 continue
                             except Exception as e:
                                 failed_count += 1
                                 error_msg = str(e)[:200]
-                                
+
                                 # Try SQL-based deletion as fallback
                                 try:
                                     frappe.db.sql("""
-                                        DELETE FROM `tabAttendance` 
+                                        DELETE FROM `tabAttendance`
                                         WHERE name = %s
                                     """, (att.name,))
                                     frappe.db.commit()
@@ -707,41 +708,41 @@ def cancel_uploaded_file(doc, method):
                                         append_log(doc, f"❌ Failed to remove {att.name}: {str(sql_err)[:200]}")
                                     frappe.db.rollback()
                                 continue
-                        
-                        start += batch_size
-                        # Small delay to avoid overwhelming the system
+
+                        # Commit after each batch
                         frappe.db.commit()
 
                     append_log(doc, f"✅ Deleted {deleted_count} Attendance records (Failed: {failed_count} out of {total_count} total)")
         else:
             # For smaller datasets (< 5000), use individual deletion with pagination
             batch_size = 1000
-            start = 0
-            
-            while start < total_count:
-                # Get batch of attendance records
+            batch_num = 0
+
+            while True:
+                # Get batch of attendance records (always from start since we're deleting)
                 attendances = frappe.get_all(
                     "Attendance",
                     filters={"custom_crystal_upload_ref": doc.name},
                     fields=["name", "docstatus"],
-                    limit_start=start,
+                    limit_start=0,  # Always query from 0 since records are being deleted
                     limit_page_length=batch_size,
                     order_by="name"
                 )
-                
+
                 if not attendances:
                     break
-                
-                append_log(doc, f"Processing batch: {start + 1} to {min(start + batch_size, total_count)} of {total_count}")
-                
+
+                batch_num += 1
+                append_log(doc, f"Processing batch {batch_num}: {len(attendances)} records (Total deleted so far: {deleted_count}/{total_count})")
+
                 for att in attendances:
                     try:
                         # Check if document still exists
                         if not frappe.db.exists("Attendance", att.name):
                             continue
-                        
+
                         att_doc = frappe.get_doc("Attendance", att.name)
-                        
+
                         # Cancel if submitted
                         if att_doc.docstatus == 1:
                             try:
@@ -750,26 +751,26 @@ def cancel_uploaded_file(doc, method):
                             except Exception as cancel_err:
                                 append_log(doc, f"⚠️ Could not cancel {att.name}: {str(cancel_err)[:200]}")
                                 # Continue to try deletion anyway
-                        
+
                         # Delete the attendance
                         frappe.delete_doc("Attendance", att.name, force=1, ignore_permissions=True)
                         frappe.db.commit()
                         deleted_count += 1
-                        
+
                         if deleted_count % 100 == 0:  # Log progress every 100 records
                             append_log(doc, f"Progress: Deleted {deleted_count}/{total_count} attendances...")
-                            
+
                     except frappe.DoesNotExistError:
                         # Already deleted, skip
                         continue
                     except Exception as e:
                         failed_count += 1
                         error_msg = str(e)[:200]
-                        
+
                         # Try SQL-based deletion as fallback
                         try:
                             frappe.db.sql("""
-                                DELETE FROM `tabAttendance` 
+                                DELETE FROM `tabAttendance`
                                 WHERE name = %s
                             """, (att.name,))
                             frappe.db.commit()
@@ -781,8 +782,8 @@ def cancel_uploaded_file(doc, method):
                                 append_log(doc, f"❌ Failed to remove {att.name}: {str(sql_err)[:200]}")
                             frappe.db.rollback()
                         continue
-                
-                start += batch_size
+
+                # Commit after each batch
                 frappe.db.commit()
 
             append_log(doc, f"✅ Deleted {deleted_count} Attendance records (Failed: {failed_count} out of {total_count} total)")
