@@ -20,6 +20,7 @@ from hr_reports.utils.clean_format.clean_daily_inout7_1 import clean_daily_inout
 from hr_reports.utils.clean_format.clean_daily_inout7_2 import clean_daily_inout7_2
 from hr_reports.utils.clean_format.clean_daily_inout15 import clean_daily_inout15
 from hr_reports.utils.clean_format.clean_daily_inout_matrix import clean_daily_inout_matrix
+from hr_reports.utils.clean_format.clean_daily_inout_matrix_2 import clean_daily_inout_matrix_2
 from frappe.core.doctype.data_import.data_import import start_import
 
 
@@ -496,7 +497,7 @@ def process_uploaded_file(doc, method):
                 append_log(doc, f"❌ Error in clean_daily_inout15: {str(e)}")
                 raise
 
-        elif doc.branch in ["Walunj OFC Aurangabad","stl aurangabad ofc", "STL Aurangabad OFC", "Matrix Format"]:
+        elif doc.branch in ["Walunj OFC Aurangabad","stl aurangabad ofc", "STL Aurangabad OFC"]:
             clean_daily_inout_matrix(
                 input_path=local_path,
                 output_path=cleaned_path,
@@ -504,6 +505,15 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout_matrix for Matrix Report format")
+
+        elif doc.branch in ["STL Shendra", "STL Walunj", "stl walunj", "stl shendra"]:
+            clean_daily_inout_matrix_2(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout_matrix_2 for Monthly Status Report format")
 
         else:
             clean_crystal_excel(
