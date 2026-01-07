@@ -31,11 +31,11 @@ import pandas as pd
 # -------------------------
 # Helpers
 # -------------------------
-def parse_period(df: pd.DataFrame) -> Optional[datetime]:
+def parse_period(df: pd.DataFrame) -> tuple:
     """
     Parse the period from the title row.
     Example: "Custom Attendance Register From ‎21/10/2025‎ To ‎20/11/2025"
-    Returns the month/year from the start date
+    Returns tuple of (start_date, end_date)
     """
     try:
         # Check first few rows for the period
@@ -43,26 +43,29 @@ def parse_period(df: pd.DataFrame) -> Optional[datetime]:
             row_text = " ".join([str(x) for x in df.iloc[i].dropna().astype(str).tolist()])
 
             # Match pattern: "From DD/MM/YYYY To DD/MM/YYYY"
-            m = re.search(r'From\s+.*?(\d{1,2})/(\d{1,2})/(\d{4})', row_text, re.IGNORECASE)
+            m = re.search(r'From\s+.*?(\d{1,2})/(\d{1,2})/(\d{4}).*?To\s+.*?(\d{1,2})/(\d{1,2})/(\d{4})', row_text, re.IGNORECASE)
             if m:
-                day, month, year = m.groups()
-                dt = datetime(int(year), int(month), int(day))
-                print(f"[parse_period] Found period: {dt:%Y-%m-%d}")
-                return dt
+                start_day, start_month, start_year, end_day, end_month, end_year = m.groups()
+                start_dt = datetime(int(start_year), int(start_month), int(start_day))
+                end_dt = datetime(int(end_year), int(end_month), int(end_day))
+                print(f"[parse_period] Found period: {start_dt:%Y-%m-%d} to {end_dt:%Y-%m-%d}")
+                return start_dt, end_dt
 
         # Fallback to current date
         today = datetime.today()
-        print(f"[parse_period] Period not found, using today: {today:%Y-%m}")
-        return today
+        print(f"[parse_period] Period not found, using today")
+        return today, today
     except Exception as e:
         print(f"[parse_period] Error: {e}")
-        return datetime.today()
+        today = datetime.today()
+        return today, today
 
 
-def parse_date_from_cell(cell_value, month_dt: datetime) -> Optional[str]:
+def parse_date_from_cell(cell_value, start_dt: datetime, end_dt: datetime) -> Optional[str]:
     """
     Parse date from cell like "21\\nTue" or "1\\nSat"
     Returns YYYY-MM-DD format
+    Handles periods spanning two months (e.g., Nov 21 to Dec 20)
     """
     if pd.isna(cell_value):
         return None
@@ -73,16 +76,25 @@ def parse_date_from_cell(cell_value, month_dt: datetime) -> Optional[str]:
         m = re.match(r'(\d{1,2})', text)
         if m:
             day = int(m.group(1))
-            # Compose date with the month/year from period
+
+            # Determine which month this day belongs to
+            # If day >= start_day, it's in the start month
+            # Otherwise, it's in the end month
+            if day >= start_dt.day:
+                # This day belongs to the start month
+                try:
+                    date_obj = datetime(start_dt.year, start_dt.month, day)
+                    return date_obj.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+
+            # This day belongs to the end month
             try:
-                date_obj = datetime(month_dt.year, month_dt.month, day)
+                date_obj = datetime(end_dt.year, end_dt.month, day)
                 return date_obj.strftime("%Y-%m-%d")
             except ValueError:
-                # Day might be from next month
-                if day < 15:  # Assume it's next month
-                    next_month = month_dt.replace(day=1) + timedelta(days=32)
-                    date_obj = datetime(next_month.year, next_month.month, day)
-                    return date_obj.strftime("%Y-%m-%d")
+                pass
+
         return None
     except Exception as e:
         print(f"[parse_date_from_cell] Error parsing '{cell_value}': {e}")
@@ -238,7 +250,7 @@ def clean_daily_inout_matrix(input_path: str, output_path: str, company: str = N
     print(f"[clean_daily_inout_matrix] Raw shape: {df.shape}")
 
     # Parse period from title row
-    month_dt = parse_period(df)
+    start_dt, end_dt = parse_period(df)
 
     # Find all employee rows (rows with User IDs starting with 'A' in column 2)
     employee_rows = []
@@ -295,7 +307,7 @@ def clean_daily_inout_matrix(input_path: str, output_path: str, company: str = N
                 out_cell = out_row[col_idx]
 
                 # Parse date
-                date_str = parse_date_from_cell(date_cell, month_dt)
+                date_str = parse_date_from_cell(date_cell, start_dt, end_dt)
                 if not date_str:
                     continue
 
@@ -303,8 +315,22 @@ def clean_daily_inout_matrix(input_path: str, output_path: str, company: str = N
                 in_time = parse_time(date_str, in_cell)
                 out_time = parse_time(date_str, out_cell)
 
-                # Skip if no punch data
+                # If no punch data, mark as Absent with blank fields
                 if not in_time and not out_time:
+                    record = {
+                        "Attendance Date": date_str,
+                        "Employee": emp_code,
+                        "Employee Name": emp_name,
+                        "Status": "Absent",
+                        "In Time": "",
+                        "Out Time": "",
+                        "Working Hours": "",
+                        "Over Time": "",
+                        "Shift": "",
+                        "Company": company if company else "Vaaman Engineers India Limited",
+                        "Branch": branch if branch else emp_branch,
+                    }
+                    records.append(record)
                     continue
 
                 # Calculate working hours
