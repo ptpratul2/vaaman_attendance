@@ -22,6 +22,7 @@ from hr_reports.utils.clean_format.clean_daily_inout15 import clean_daily_inout1
 from hr_reports.utils.clean_format.clean_daily_inout_matrix import clean_daily_inout_matrix
 from hr_reports.utils.clean_format.clean_daily_inout_matrix_2 import clean_daily_inout_matrix_2
 from hr_reports.utils.clean_format.clean_daily_inout16 import clean_daily_inout16
+from hr_reports.utils.clean_format.clean_daily_inout_pdf import clean_daily_inout_pdf
 from frappe.core.doctype.data_import.data_import import start_import
 
 
@@ -524,6 +525,16 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout16 for Polycab rptDAttendanceReg format")
+
+        elif doc.branch in ["AMNS Surat"]:
+            clean_daily_inout_pdf(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch,
+                pdf_method="auto"
+            )
+            append_log(doc, "Step 2: Used clean_manhour_vertical for AMNS Surat ManHour Report (PDF)")
 
         else:
             clean_crystal_excel(
