@@ -1,4 +1,4 @@
-# clean_manhour_vertical.py
+# clean_daily_inout_pdf.py
 """
 Cleaner for ManHour Report (Vertical PDF format - HSM-2 Project / AMNS Surat).
 
@@ -411,7 +411,7 @@ def calculate_overtime(work_hours: float) -> str:
 # -------------------------
 # Main Cleaning Function
 # -------------------------
-def clean_manhour_vertical(
+def clean_daily_inout_pdf(
     input_path: str,
     output_path: str,
     company: str = None,
@@ -432,18 +432,18 @@ def clean_manhour_vertical(
         Cleaned DataFrame
     """
     print("=" * 80)
-    print("[clean_manhour_vertical] Starting - ManHour Vertical Report (PDF)")
-    print(f"[clean_manhour_vertical] Input: {input_path}")
-    print(f"[clean_manhour_vertical] Output: {output_path}")
+    print("[clean_daily_inout_pdf] Starting - ManHour Vertical Report (PDF)")
+    print(f"[clean_daily_inout_pdf] Input: {input_path}")
+    print(f"[clean_daily_inout_pdf] Output: {output_path}")
     print("=" * 80)
     
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
     
     # Step 1: Extract PDF to DataFrame
-    print("[clean_manhour_vertical] Step 1: Extracting PDF to DataFrame...")
+    print("[clean_daily_inout_pdf] Step 1: Extracting PDF to DataFrame...")
     df_raw = extract_pdf_to_dataframe(input_path, method=pdf_method)
-    print(f"[clean_manhour_vertical] Raw shape: {df_raw.shape}")
+    print(f"[clean_daily_inout_pdf] Raw shape: {df_raw.shape}")
     
     # Step 2: Identify header row and set column names
     header_idx = identify_header_row(df_raw)
@@ -458,12 +458,12 @@ def clean_manhour_vertical(
         df.columns = [str(col).strip().replace('\n', ' ') if col and str(col).strip() else f"Col{i}"
                       for i, col in enumerate(df.columns)]
 
-        print(f"[clean_manhour_vertical] Header found at row {header_idx}")
-        print(f"[clean_manhour_vertical] Columns after header: {df.columns.tolist()}")
+        print(f"[clean_daily_inout_pdf] Header found at row {header_idx}")
+        print(f"[clean_daily_inout_pdf] Columns after header: {df.columns.tolist()}")
     else:
         df = df_raw.copy()
         # If no header found, use standard column names
-        print(f"[clean_manhour_vertical] No header found, using standard column names")
+        print(f"[clean_daily_inout_pdf] No header found, using standard column names")
         expected_cols = [
             "Project", "Contractor", "Workmen", "IDNo", "Workorder No", "Workskill",
             "Card Type", "Shift", "Date", "In Time", "Out Time",
@@ -474,29 +474,29 @@ def clean_manhour_vertical(
         else:
             df.columns = expected_cols[:len(df.columns)]
 
-    print(f"[clean_manhour_vertical] Final columns: {df.columns.tolist()}")
-    print(f"[clean_manhour_vertical] Data rows: {len(df)}")
+    print(f"[clean_daily_inout_pdf] Final columns: {df.columns.tolist()}")
+    print(f"[clean_daily_inout_pdf] Data rows: {len(df)}")
 
     # Check if Date column exists
     if "Date" not in df.columns:
-        print("[clean_manhour_vertical] ⚠️ 'Date' column not found!")
-        print(f"[clean_manhour_vertical] Available columns: {df.columns.tolist()}")
-        print("[clean_manhour_vertical] Sample data:")
+        print("[clean_daily_inout_pdf] ⚠️ 'Date' column not found!")
+        print(f"[clean_daily_inout_pdf] Available columns: {df.columns.tolist()}")
+        print("[clean_daily_inout_pdf] Sample data:")
         print(df.head(3))
         raise ValueError("Date column not found in extracted data")
 
     # Step 3: Filter out header rows and empty rows
-    print(f"[clean_manhour_vertical] Filtering rows where Date is not empty...")
+    print(f"[clean_daily_inout_pdf] Filtering rows where Date is not empty...")
     df = df[df["Date"].notna() & (df["Date"] != "Date")]
     df = df.reset_index(drop=True)
-    print(f"[clean_manhour_vertical] After filtering: {len(df)} rows")
+    print(f"[clean_daily_inout_pdf] After filtering: {len(df)} rows")
     
     # Step 4: Process each row
     records = []
     skipped_rows = 0
     processed_rows = 0
 
-    print(f"[clean_manhour_vertical] Processing {len(df)} rows...")
+    print(f"[clean_daily_inout_pdf] Processing {len(df)} rows...")
 
     for idx, row in df.iterrows():
         try:
@@ -517,7 +517,7 @@ def clean_manhour_vertical(
             if not date_raw or not id_no_raw:
                 skipped_rows += 1
                 if skipped_rows <= 5:  # Log first 5 skips for debugging
-                    print(f"[clean_manhour_vertical] Row {idx} skipped: date_raw='{date_raw}', id_no_raw='{id_no_raw}'")
+                    print(f"[clean_daily_inout_pdf] Row {idx} skipped: date_raw='{date_raw}', id_no_raw='{id_no_raw}'")
                 continue
             
             # Normalize User ID
@@ -532,17 +532,17 @@ def clean_manhour_vertical(
                 )
                 if not emp_code:
                     emp_code = ""
-                    print(f"[clean_manhour_vertical] Warning: No Employee found for User ID {user_id} (raw: {id_no_raw})")
+                    print(f"[clean_daily_inout_pdf] Warning: No Employee found for User ID {user_id} (raw: {id_no_raw})")
             except Exception as e:
                 emp_code = ""
-                print(f"[clean_manhour_vertical] Error looking up User ID {user_id}: {e}")
+                print(f"[clean_daily_inout_pdf] Error looking up User ID {user_id}: {e}")
             
             # Parse date
             date_str = parse_date(date_raw)
             if not date_str:
                 skipped_rows += 1
                 if skipped_rows <= 10:
-                    print(f"[clean_manhour_vertical] Row {idx} skipped: failed to parse date '{date_raw}'")
+                    print(f"[clean_daily_inout_pdf] Row {idx} skipped: failed to parse date '{date_raw}'")
                 continue
             
             # Parse times
@@ -591,15 +591,15 @@ def clean_manhour_vertical(
 
             # Log progress every 50 records
             if processed_rows % 50 == 0:
-                print(f"[clean_manhour_vertical] Processed {processed_rows} records...")
+                print(f"[clean_daily_inout_pdf] Processed {processed_rows} records...")
 
         except Exception as e:
-            print(f"[clean_manhour_vertical] Error processing row {idx}: {e}")
+            print(f"[clean_daily_inout_pdf] Error processing row {idx}: {e}")
             skipped_rows += 1
             continue
 
     # Summary
-    print(f"[clean_manhour_vertical] Processing complete:")
+    print(f"[clean_daily_inout_pdf] Processing complete:")
     print(f"  - Total rows after filter: {len(df)}")
     print(f"  - Successfully processed: {processed_rows}")
     print(f"  - Skipped/failed: {skipped_rows}")
@@ -636,7 +636,7 @@ def clean_manhour_vertical(
         )
         raise ValueError(error_msg)
     
-    print(f"[clean_manhour_vertical] Total records parsed: {len(df_final)}")
+    print(f"[clean_daily_inout_pdf] Total records parsed: {len(df_final)}")
     
     # Step 6: Save output
     out_dir = os.path.dirname(output_path)
@@ -644,8 +644,8 @@ def clean_manhour_vertical(
         os.makedirs(out_dir, exist_ok=True)
     
     df_final.to_excel(output_path, index=False)
-    print(f"[clean_manhour_vertical] Saved cleaned file: {output_path}")
-    print("[clean_manhour_vertical] Done ✅")
+    print(f"[clean_daily_inout_pdf] Saved cleaned file: {output_path}")
+    print("[clean_daily_inout_pdf] Done ✅")
     
     return df_final
 
@@ -658,7 +658,7 @@ if __name__ == "__main__":
     input_pdf = "/path/to/ManHour_December_2025.pdf"
     output_excel = "/path/to/ManHour_December_2025_cleaned.xlsx"
     
-    df_cleaned = clean_manhour_vertical(
+    df_cleaned = clean_daily_inout_pdf(
         input_path=input_pdf,
         output_path=output_excel,
         company="Vaaman Engineers India Limited",
