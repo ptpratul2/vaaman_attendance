@@ -23,6 +23,7 @@ from hr_reports.utils.clean_format.clean_daily_inout_matrix import clean_daily_i
 from hr_reports.utils.clean_format.clean_daily_inout_matrix_2 import clean_daily_inout_matrix_2
 from hr_reports.utils.clean_format.clean_daily_inout16 import clean_daily_inout16
 from hr_reports.utils.clean_format.clean_daily_inout17 import clean_daily_inout17
+from hr_reports.utils.clean_format.clean_daily_inout18 import clean_daily_inout18
 from hr_reports.utils.clean_format.clean_daily_inout_pdf import clean_daily_inout_pdf
 from frappe.core.doctype.data_import.data_import import start_import
 
@@ -535,6 +536,15 @@ def process_uploaded_file(doc, method):
                 branch=doc.branch
             )
             append_log(doc, "Step 2: Used clean_daily_inout17 for Hirakud FRP row-based format")
+
+        elif doc.branch in ["Hirakud Smelter"]:
+            clean_daily_inout18(
+                input_path=local_path,
+                output_path=cleaned_path,
+                company=doc.company,
+                branch=doc.branch
+            )
+            append_log(doc, "Step 2: Used clean_daily_inout18 for Hirakud Smelter PUNCH TIMING format")
 
         elif doc.branch in ["AMNS Surat"]:
             clean_daily_inout_pdf(
