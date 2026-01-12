@@ -6,9 +6,11 @@
  "engine": "InnoDB",
  "field_order": [
   "employee",
+  "attendance_device_id_biometricrf_tag_id",
   "attendance_date",
   "over_time",
-  "shift"
+  "shift",
+  "branch"
  ],
  "fields": [
   {
@@ -16,23 +18,19 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Employee",
-   "options": "Employee",
-   "reqd": 1
+   "options": "Employee"
   },
   {
    "fieldname": "attendance_date",
    "fieldtype": "Date",
    "in_list_view": 1,
-   "label": "Attendance Date",
-   "reqd": 1
+   "label": "Attendance Date"
   },
   {
    "fieldname": "over_time",
    "fieldtype": "Float",
    "in_list_view": 1,
-   "label": "Over Time",
-   "precision": "2",
-   "reqd": 1
+   "label": "Over Time"
   },
   {
    "fieldname": "shift",
@@ -40,19 +38,32 @@
    "in_list_view": 1,
    "label": "Shift",
    "options": "Shift Type"
+  },
+  {
+   "fieldname": "attendance_device_id_biometricrf_tag_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Attendance Device ID (Biometric/RF tag ID)"
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "label": "Branch",
+   "options": "Branch"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-11-14 12:00:56.242225",
+ "modified": "2026-01-12 15:28:09.961265",
  "modified_by": "Administrator",
  "module": "hr_reports",
  "name": "Overtime Import Item",
  "owner": "Administrator",
  "permissions": [],
  "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []

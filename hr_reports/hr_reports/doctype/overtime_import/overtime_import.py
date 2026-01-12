@@ -54,9 +54,21 @@ class OverTimeImport(Document):
         except Exception as e:
             frappe.throw(f"Failed to read file: {str(e)}")
 
-        # Normalize column names
-        df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
+        # Normalize column names - strip spaces, lowercase, replace spaces and hyphens with underscores
+        # Remove parentheses and everything inside them
+        df.columns = (
+            df.columns.str.strip()
+            .str.lower()
+            .str.replace(r"\([^)]*\)", "", regex=True)  # Remove (text)
+            .str.replace(" ", "_")
+            .str.replace("-", "_")
+            .str.replace("/", "_")
+            .str.strip("_")  # Remove leading/trailing underscores
+        )
         df = df.where(pd.notnull(df), None)
+
+        # Debug: show what columns were found
+        frappe.msgprint(f"Found columns: {', '.join(df.columns.tolist())}")
 
         # Step 3: Clear existing rows
         self.set("overtime_import_details", [])
@@ -64,12 +76,40 @@ class OverTimeImport(Document):
         # Step 4: Append rows
         for _, row in df.iterrows():
             raw_ot = row.get("over_time") or row.get("overtime") or row.get("ot")
+
+            # Helper to safely get values and handle NaN
+            def safe_get(*args):
+                """Get first non-null, non-NaN value from arguments"""
+                for val in args:
+                    if val is not None and not pd.isna(val):
+                        return str(val).strip() if val else None
+                return None
+
+            employee_val = safe_get(
+                row.get("employee"),
+                row.get("employee_id"),
+                row.get("emp")
+            )
+            device_id_val = safe_get(
+                row.get("attendance_device_id"),
+                row.get("device_id")
+            )
+
             row_data = {
-                "employee": row.get("employee") or row.get("employee_id") or row.get("emp"),
-                "attendance_date": row.get("attendance_date") or row.get("date") or row.get("attendance_date"),
-                "over_time": parse_overtime(raw_ot),  # <-- parsed here
-                "shift": row.get("shift"),
+                "employee": employee_val,
+                "attendance_device_id_biometricrf_tag_id": device_id_val,
+                "attendance_date": safe_get(row.get("attendance_date"), row.get("date")),
+                "over_time": parse_overtime(raw_ot),
+                "shift": safe_get(row.get("shift")),
             }
             self.append("overtime_import_details", row_data)
+
+        # Step 5: Validate that each row has either employee or device_id
+        for idx, row in enumerate(self.overtime_import_details, start=1):
+            if not row.employee and not row.attendance_device_id_biometricrf_tag_id:
+                frappe.throw(
+                    f"Row {idx}: Either Employee or Attendance Device ID must be provided. "
+                    f"Found - Employee: '{row.employee}', Device ID: '{row.attendance_device_id_biometricrf_tag_id}'"
+                )
 
         frappe.msgprint(f"Successfully imported {len(df)} rows")

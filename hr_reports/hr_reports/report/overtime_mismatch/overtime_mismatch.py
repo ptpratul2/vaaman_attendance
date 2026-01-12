@@ -15,9 +15,10 @@ def execute(filters=None):
     columns = [
        {"fieldname": "branch", "label": "Branch", "fieldtype": "Data"},
        {"fieldname": "employee", "label": "Employee", "fieldtype": "Data"},
+       {"fieldname": "device_id", "label": "Attendance Device ID", "fieldtype": "Data"},
        {"fieldname": "attendance_date", "label": "Date", "fieldtype": "Date"},
-       {"fieldname": "import_overtime", "label": "Imported OT", "fieldtype": "Float"},
-       {"fieldname": "system_overtime", "label": "System OT", "fieldtype": "Float"},
+       {"fieldname": "import_overtime", "label": "Imported OT", "fieldtype": "Float", "precision": 2},
+       {"fieldname": "system_overtime", "label": "System OT", "fieldtype": "Float", "precision": 2},
        {"fieldname": "shift", "label": "Shift", "fieldtype": "Data"},
        {"fieldname": "mismatch", "label": "Mismatch", "fieldtype": "Data"},
     ]
@@ -33,11 +34,25 @@ def execute(filters=None):
     for row in doc.overtime_import_details:
        imported_ot = _to_float(row.over_time)
        system_ot = 0.0
-       attendance_name = frappe.db.get_value(
-           "Attendance",
-           {"employee": row.employee, "attendance_date": row.attendance_date},
-           "name",
-       )
+
+       # Determine employee: either from direct employee field or by finding via device_id
+       employee_id = row.employee
+       if not employee_id and row.attendance_device_id_biometricrf_tag_id:
+           # Find employee by device_id
+           employee_id = frappe.db.get_value(
+               "Employee",
+               {"attendance_device_id": row.attendance_device_id_biometricrf_tag_id},
+               "name",
+           )
+
+       attendance_name = None
+       if employee_id:
+           attendance_name = frappe.db.get_value(
+               "Attendance",
+               {"employee": employee_id, "attendance_date": row.attendance_date},
+               "name",
+           )
+
        att = None
        if attendance_name:
            att = frappe.get_doc("Attendance", attendance_name)
@@ -53,15 +68,19 @@ def execute(filters=None):
                    system_ot = _to_float(val)
                    break
 
-       mismatch = abs(imported_ot - system_ot) > 0.0001
+       # Round both values to 2 decimal places for comparison
+       imported_ot_rounded = round(imported_ot, 2)
+       system_ot_rounded = round(system_ot, 2)
+       mismatch = abs(imported_ot_rounded - system_ot_rounded) > 0.01
 
        rec = {
-           "branch": (row.branch or doc.branch or (att.custom_branch if att and getattr(att, "custom_branch", None) else "") or "v2"),
-           "employee": row.employee or "HR-EMP-00058",
-           "attendance_date": row.attendance_date or "2025-07-17",
-           "import_overtime": imported_ot if imported_ot is not None else 0.0,
-           "system_overtime": system_ot if system_ot is not None else 0.0,
-           "shift": row.shift or (att.shift if att else "") or "N",
+           "branch": (row.branch or doc.branch or (att.custom_branch if att and getattr(att, "custom_branch", None) else "") or ""),
+           "employee": employee_id or "Unknown",
+           "device_id": row.attendance_device_id_biometricrf_tag_id or "",
+           "attendance_date": row.attendance_date,
+           "import_overtime": imported_ot_rounded,
+           "system_overtime": system_ot_rounded,
+           "shift": row.shift or (att.shift if att else "") or "",
            "mismatch": "Yes" if mismatch else "No",
        }       
        # add a small helper so the frontend formatter can highlight columns
@@ -72,13 +91,14 @@ def execute(filters=None):
     if not data:
        data.append(
            {
-               "branch": "TEST",
-               "employee": "HR-EMP-TEST",
+               "branch": "",
+               "employee": "",
+               "device_id": "",
                "attendance_date": frappe.utils.nowdate(),
                "import_overtime": 0.0,
                "system_overtime": 0.0,
-               "shift": "A",
-               "mismatch": "",
+               "shift": "",
+               "mismatch": "No",
            }
        )
 
