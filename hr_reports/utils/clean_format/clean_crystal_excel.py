@@ -2,7 +2,7 @@
 import os
 import re
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import frappe
 
@@ -40,7 +40,7 @@ def convert_xls_to_xlsx(xls_path: str) -> str:
 # -------------------------
 # Helpers
 # -------------------------
-def find_report_range_row(df: pd.DataFrame, max_rows: int = 5) -> Optional[int]:
+def find_report_range_row(df: pd.DataFrame, max_rows: int = 10) -> Optional[int]:
    month_pattern = re.compile(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b', re.IGNORECASE)
    for i in range(min(max_rows, len(df))):
        row_text = " ".join([str(x) for x in df.iloc[i].dropna().astype(str).tolist()]).strip()
@@ -49,12 +49,24 @@ def find_report_range_row(df: pd.DataFrame, max_rows: int = 5) -> Optional[int]:
    return None
 
 def parse_month_year_from_range(text: str) -> Optional[datetime]:
+   # Try format: "01-Jan-2026" or "1-Jan-2026"
+   m = re.search(r'(\d{1,2})[-/](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[-/](\d{4})', text, re.IGNORECASE)
+   if m:
+       try:
+           day = int(m.group(1))
+           month_str = m.group(2)
+           year = int(m.group(3))
+           return datetime.strptime(f"{day} {month_str} {year}", "%d %b %Y")
+       except Exception:
+           pass
+   # Try format: "Jan 01, 2026" or "Jan 1 2026"
    m = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s*\d{1,2}\,?\s*\d{4}', text, re.IGNORECASE)
    if m:
        try:
-           return datetime.strptime(m.group(0).replace('.', ''), "%b %d %Y")
+           return datetime.strptime(m.group(0).replace('.', '').replace(',', ''), "%b %d %Y")
        except Exception:
            pass
+   # Try format: "Jan 2026"
    m2 = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s*\d{4}', text, re.IGNORECASE)
    if m2:
        try:
@@ -64,9 +76,11 @@ def parse_month_year_from_range(text: str) -> Optional[datetime]:
    return None
 
 def detect_date_row(df: pd.DataFrame, start_search: int = 0, max_rows: int = 20) -> Optional[int]:
+   # Pattern for dates like "01-Jan", "02-Jan" or just "01", "02"
+   date_pattern = re.compile(r'^\s*(\d{1,2})(?:[-/](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))?\b', re.IGNORECASE)
    for r in range(start_search, min(len(df), max_rows)):
        row = df.iloc[r].astype(str).fillna("").tolist()
-       day_count = sum(1 for cell in row if re.match(r'^\s*\d{1,2}\b', cell))
+       day_count = sum(1 for cell in row if date_pattern.match(cell))
        if day_count >= 6:
            print(f"[detect_date_row] Found likely date row at index {r} (day_count={day_count})")
            return r
@@ -79,14 +93,27 @@ def build_date_map(date_row: List[object], month_dt: datetime) -> Dict[int, str]
        if pd.isna(cell):
            continue
        s = str(cell).strip()
-       m = re.match(r'^\s*(\d{1,2})\b', s)
+       # Try format "01-Jan" or "01-Jan-2026"
+       m = re.match(r'^\s*(\d{1,2})[-/](Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:[-/](\d{4}))?\b', s, re.IGNORECASE)
        if m:
            day = int(m.group(1))
+           month_str = m.group(2)
+           year = int(m.group(3)) if m.group(3) else month_dt.year
            try:
-               composed = datetime(year=month_dt.year, month=month_dt.month, day=day)
-               date_map[idx] = composed.strftime("%Y-%m-%d")  # <-- dash format
+               composed = datetime.strptime(f"{day} {month_str} {year}", "%d %b %Y")
+               date_map[idx] = composed.strftime("%Y-%m-%d")
            except Exception:
                continue
+       else:
+           # Fallback: try just day number like "01", "02"
+           m2 = re.match(r'^\s*(\d{1,2})\b', s)
+           if m2:
+               day = int(m2.group(1))
+               try:
+                   composed = datetime(year=month_dt.year, month=month_dt.month, day=day)
+                   date_map[idx] = composed.strftime("%Y-%m-%d")
+               except Exception:
+                   continue
    print(f"[build_date_map] Built date_map for {len(date_map)} day columns")
    return date_map
 
@@ -130,6 +157,61 @@ def format_timestamp(date_str: str, time_val, is_checkin=True):
        hours = 9 if is_checkin else 17  # 9:00 for in, 17:00 for out
 
    return f"{date_str} {hours:02d}:{minutes:02d}:00"
+
+
+def calculate_working_hours(in_time: Optional[str], out_time: Optional[str]) -> float:
+    """
+    Calculate working hours between in_time and out_time.
+    Handles overnight shifts.
+    Returns hours in decimal format.
+    """
+    if not in_time or not out_time:
+        return 0.0
+
+    try:
+        in_dt = datetime.strptime(in_time, "%Y-%m-%d %H:%M:%S")
+        out_dt = datetime.strptime(out_time, "%Y-%m-%d %H:%M:%S")
+
+        # Handle overnight shifts
+        if out_dt < in_dt:
+            out_dt = out_dt + timedelta(days=1)
+
+        diff = out_dt - in_dt
+        hours = diff.total_seconds() / 3600
+
+        return round(hours, 2)
+    except Exception as e:
+        print(f"[calculate_working_hours] Error: {e}")
+        return 0.0
+
+
+def format_working_hours(hours: float) -> str:
+    """Convert decimal hours to HH:MM format"""
+    if hours <= 0:
+        return "00:00"
+
+    h = int(hours)
+    m = int((hours - h) * 60)
+    return f"{h:02d}:{m:02d}"
+
+
+def calculate_overtime(work_hours: float) -> str:
+    """
+    Calculate overtime.
+    Formula: OT = Working Hours - 9
+    Returns blank if OT < 0 hour
+    """
+    if not work_hours or work_hours <= 0:
+        return ""
+
+    shift_hours = 9
+    overtime = round(work_hours - shift_hours, 2)
+
+    if overtime <= 0:
+        return ""
+
+    return str(overtime)
+
 
 # -------------------------
 # Main function
@@ -178,23 +260,13 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
    date_row = df_raw.iloc[date_row_idx].tolist()
    date_map = build_date_map(date_row, month_dt)
 
-   overtime_col_idx = None
-   search_rows_for_header = list(range(max(0, date_row_idx - 2), min(len(df_raw), date_row_idx + 6)))
-   for r in search_rows_for_header:
-       for c, cell in enumerate(df_raw.iloc[r].astype(str).fillna("")):
-           if re.search(r'\bover\s*time\b|\bovertime\b|\bOT\b', str(cell), re.IGNORECASE):
-               overtime_col_idx = c
-               print(f"[clean_crystal_excel] Found overtime header at row {r}, col {c}")
-               break
-       if overtime_col_idx is not None:
-           break
-
    records = []
    r = date_row_idx + 1
    total_rows = len(df_raw)
 
    status_map = {
        "H": "Holiday",
+       "HO": "Holiday",
        "WO": "Holiday",
        "A": "Absent",
        "P": "Present",
@@ -219,7 +291,7 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
 
        emp_code_label_col = None
        for c, cell in enumerate(row0):
-           if isinstance(cell, str) and re.match(r'^\s*Emp\.?\s*Code', cell, re.IGNORECASE):
+           if isinstance(cell, str) and re.match(r'^\s*Emp(loyee)?\.?\s*Code', cell, re.IGNORECASE):
                emp_code_label_col = c
                break
 
@@ -236,7 +308,7 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
 
        emp_name = None
        for c, cell in enumerate(row0):
-           if isinstance(cell, str) and re.match(r'^\s*Emp\.?\s*Name', cell, re.IGNORECASE):
+           if isinstance(cell, str) and re.match(r'^\s*Emp(loyee)?\.?\s*Name', cell, re.IGNORECASE):
                for cc in range(c + 1, len(row0)):
                    candidate = row0[cc]
                    if pd.notna(candidate) and str(candidate).strip() != "":
@@ -256,19 +328,16 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
        status_row = None
        intime_row = None
        outtime_row = None
-       totals_row = None
        search_end = min(total_rows, r + 20)  # Increased from 12 for more robustness
        for r2 in range(r + 1, search_end):
            row_vals = df_raw.iloc[r2].astype(object).tolist()
            first_texts = [str(x).strip() if pd.notna(x) else "" for x in row_vals[:6]]
            if any(re.match(r'^\s*Status\s*$', t, re.IGNORECASE) for t in first_texts):
                status_row = df_raw.iloc[r2]
-           if any(re.match(r'^\s*InTime\s*$', t, re.IGNORECASE) for t in first_texts):
+           if any(re.match(r'^\s*In\s*Time\s*$', t, re.IGNORECASE) for t in first_texts):
                intime_row = df_raw.iloc[r2]
-           if any(re.match(r'^\s*OutTime\s*$', t, re.IGNORECASE) for t in first_texts):
+           if any(re.match(r'^\s*Out\s*Time\s*$', t, re.IGNORECASE) for t in first_texts):
                outtime_row = df_raw.iloc[r2]
-           if any(re.match(r'^\s*Total\s*$', t, re.IGNORECASE) for t in first_texts):
-               totals_row = df_raw.iloc[r2]
            if status_row is not None and intime_row is not None and outtime_row is not None:
                break
 
@@ -296,19 +365,12 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
            if outtime_row is not None and col_idx < len(outtime_row):
                check_out = format_timestamp(date_str, outtime_row.iloc[col_idx], is_checkin=False)
 
-           overtime_val = None
-           if overtime_col_idx is not None and totals_row is not None and overtime_col_idx < len(totals_row):
-               ot_cand = totals_row.iloc[overtime_col_idx]
-               if pd.notna(ot_cand) and str(ot_cand).strip() != "":
-                   overtime_val = ot_cand
-           if overtime_val is None and totals_row is None and overtime_col_idx is not None:
-               for try_r in range(r + 1, search_end):
-                   try_row = df_raw.iloc[try_r]
-                   if overtime_col_idx < len(try_row):
-                       ot_cand = try_row.iloc[overtime_col_idx]
-                       if pd.notna(ot_cand) and str(ot_cand).strip() != "":
-                           overtime_val = ot_cand
-                           break
+           # Calculate working hours from In Time and Out Time
+           work_hours_decimal = calculate_working_hours(check_in, check_out)
+           work_hours_formatted = format_working_hours(work_hours_decimal)
+
+           # Calculate overtime (OT = Working Hours - 9, blank if < 1 hour)
+           overtime_val = calculate_overtime(work_hours_decimal)
 
            # Use ERPNext Attendance field labels as columns
            rec = {
@@ -318,16 +380,17 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
                "Status": status_final,
                "In Time": check_in,
                "Out Time": check_out,
+               "Working Hours": work_hours_formatted,
+               "Over Time": overtime_val,
                "Company": company if company else "Vaaman Engineers India Limited",
                "Branch": branch if branch else "",
-               "Over Time": overtime_val  # Assuming custom field; remove if not present
            }
            records.append(rec)
 
        found_next_emp = False
        for look_r in range(r + 1, min(total_rows, r + 20)):
            rowlook = df_raw.iloc[look_r].astype(str).fillna("").tolist()
-           if any(re.match(r'^\s*Emp\.?\s*Code', str(x), re.IGNORECASE) for x in rowlook[:6]):
+           if any(re.match(r'^\s*Emp(loyee)?\.?\s*Code', str(x), re.IGNORECASE) for x in rowlook[:15]):
                r = look_r
                found_next_emp = True
                break
@@ -335,7 +398,7 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
            r += 1
 
    # Use ERPNext Attendance field labels as columns
-   final_cols = ["Attendance Date", "Employee", "Employee Name", "Status", "In Time", "Out Time", "Company", "Branch", "Over Time"]
+   final_cols = ["Attendance Date", "Employee", "Employee Name", "Status", "In Time", "Out Time", "Working Hours", "Over Time", "Company", "Branch"]
    df_final = pd.DataFrame.from_records(records, columns=final_cols)
     # Remove any rows where all critical fields are empty
    df_final = df_final.dropna(subset=["Attendance Date", "Employee", "Status"], how="all")
