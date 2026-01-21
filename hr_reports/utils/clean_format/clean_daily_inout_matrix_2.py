@@ -275,8 +275,12 @@ def find_employee_blocks(df: pd.DataFrame, start_row: int) -> List[Tuple[int, st
             # Extract employee code from column 3
             emp_code = str(df.iloc[i][3]).strip() if pd.notna(df.iloc[i][3]) else ""
 
-            # Extract employee name from column 12
-            emp_name = str(df.iloc[i][12]).strip() if pd.notna(df.iloc[i][12]) else ""
+            # Extract employee name from column 12 or 13 (some files have it at 13)
+            emp_name = ""
+            if pd.notna(df.iloc[i][12]) and str(df.iloc[i][12]).strip():
+                emp_name = str(df.iloc[i][12]).strip()
+            elif len(df.columns) > 13 and pd.notna(df.iloc[i][13]) and str(df.iloc[i][13]).strip():
+                emp_name = str(df.iloc[i][13]).strip()
 
             if emp_code:
                 employee_blocks.append((i, emp_code, emp_name))
