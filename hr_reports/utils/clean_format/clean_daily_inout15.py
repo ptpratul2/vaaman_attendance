@@ -115,7 +115,7 @@ def detect_header_row(df: pd.DataFrame, start: int = 0, max_check: int = 20) -> 
                     pass
 
         # Header row must have both required columns AND day numbers
-        if has_workmen and has_id_no and day_count >= 5:
+        if has_workmen and has_id_no and day_count >= 1:
             return r
 
     return None

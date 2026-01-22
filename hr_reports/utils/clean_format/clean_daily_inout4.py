@@ -124,7 +124,7 @@ def detect_date_row(df: pd.DataFrame, start: int = 0, max_check: int = 80) -> Op
            s = v.strip()
            if re.fullmatch(r'0?\d|[12]\d|3[01]', s):  # 0..9, 10..29, 30..31 with or without leading 0
                day_count += 1
-       if day_count >= 6:
+       if day_count >= 1:
            print(f"[detect_date_row] Day row likely at index {r} (day_count={day_count})")
            return r
    print("[detect_date_row] Could not locate day row by heuristic")

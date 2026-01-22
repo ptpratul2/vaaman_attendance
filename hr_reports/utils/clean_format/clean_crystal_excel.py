@@ -81,7 +81,7 @@ def detect_date_row(df: pd.DataFrame, start_search: int = 0, max_rows: int = 20)
    for r in range(start_search, min(len(df), max_rows)):
        row = df.iloc[r].astype(str).fillna("").tolist()
        day_count = sum(1 for cell in row if date_pattern.match(cell))
-       if day_count >= 6:
+       if day_count >= 1:
            print(f"[detect_date_row] Found likely date row at index {r} (day_count={day_count})")
            return r
    print("[detect_date_row] Could not find date row by heuristic")

@@ -84,7 +84,7 @@ def detect_date_row(df: pd.DataFrame, start: int = 0, max_check: int = 80) -> Op
     for r in range(start, min(len(df), max_check)):
         vals = df.iloc[r].astype(str).fillna("").tolist()
         day_count = sum(1 for v in vals if day_pattern.match(v.strip()))
-        if day_count >= 6:
+        if day_count >= 1:
             print(f"[detect_date_row] Day-row detected at index {r} (day_count={day_count})")
             return r
     print("[detect_date_row] Could not detect day row")
