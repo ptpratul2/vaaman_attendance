@@ -39,10 +39,11 @@ def convert_xls_to_xlsx(xls_path: str) -> str:
 # =========
 # Helpers
 # =========
-def parse_period_month(df: pd.DataFrame, max_rows: int = 15) -> datetime:
+def parse_period_month(df: pd.DataFrame, max_rows: int = 15) -> Tuple[datetime, datetime]:
     """
-    Parse month/year from header like:
+    Parse month/year and date range from header like:
     'Performance Register from 01/07/2025 to 31/07/2025'
+    Returns: (from_date, to_date)
     """
     for i in range(min(max_rows, len(df))):
         row_text = " ".join([str(x) for x in df.iloc[i].dropna().astype(str).tolist()])
@@ -62,19 +63,79 @@ def parse_period_month(df: pd.DataFrame, max_rows: int = 15) -> datetime:
         if m:
             print(f"[DEBUG parse_period_month] Row {i} -> regex matched groups: {m.groups()}")
             try:
-                dt = datetime.strptime(m.group(1).replace("-", "/"), "%d/%m/%Y")
-                print(f"[parse_period_month] Using month from: {m.group(1)} -> {dt:%Y-%m}")
-                return dt
+                from_date = datetime.strptime(m.group(1).replace("-", "/"), "%d/%m/%Y")
+                to_date = datetime.strptime(m.group(2).replace("-", "/"), "%d/%m/%Y")
+                print(f"[parse_period_month] File date range: {from_date:%Y-%m-%d} to {to_date:%Y-%m-%d}")
+                return from_date, to_date
             except Exception as e:
-                print(f"[ERROR parse_period_month] Failed to parse date {m.group(1)}: {e}")
+                print(f"[ERROR parse_period_month] Failed to parse dates {m.group(1)} - {m.group(2)}: {e}")
         else:
             print(f"[DEBUG parse_period_month] Row {i} -> regex did not match")
 
-    # fallback: today
+    # fallback: today's month (1st to last day)
     today = datetime.today()
-    print(f"[parse_period_month] Period not found in first {max_rows} rows. Using today: {today:%Y-%m}")
-    return today
+    from_date = datetime(today.year, today.month, 1)
+    # Get last day of month
+    if today.month == 12:
+        to_date = datetime(today.year, 12, 31)
+    else:
+        to_date = datetime(today.year, today.month + 1, 1) - pd.Timedelta(days=1)
+    print(f"[parse_period_month] Period not found in first {max_rows} rows. Using current month: {from_date:%Y-%m-%d} to {to_date:%Y-%m-%d}")
+    return from_date, to_date
 
+
+
+def validate_date_range(
+    file_from_date: datetime,
+    file_to_date: datetime,
+    custom_from_date: Optional[str],
+    custom_to_date: Optional[str]
+) -> Tuple[datetime, datetime]:
+    """
+    Validate user-selected date range against file date range.
+    Args:
+        file_from_date: Start date from file header
+        file_to_date: End date from file header
+        custom_from_date: User-selected from date (YYYY-MM-DD string or None)
+        custom_to_date: User-selected to date (YYYY-MM-DD string or None)
+    Returns:
+        (validated_from_date, validated_to_date) as datetime objects
+    Raises:
+        ValueError: If user dates are outside file date range
+    """
+    # If no custom dates provided, use file dates
+    if not custom_from_date or not custom_to_date:
+        print(f"[validate_date_range] No custom dates provided. Using file dates: {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}")
+        return file_from_date, file_to_date
+
+    # Parse custom dates
+    try:
+        user_from = datetime.strptime(custom_from_date, "%Y-%m-%d")
+        user_to = datetime.strptime(custom_to_date, "%Y-%m-%d")
+    except Exception as e:
+        raise ValueError(f"Invalid date format. Expected YYYY-MM-DD. Error: {e}")
+
+    # Validate user_from <= user_to
+    if user_from > user_to:
+        raise ValueError(f"From Date ({custom_from_date}) cannot be after To Date ({custom_to_date})")
+
+    # Validate dates are within file range
+    if user_from < file_from_date:
+        raise ValueError(
+            f"From Date ({custom_from_date}) is before the file's start date ({file_from_date:%Y-%m-%d}). "
+            f"File contains data from {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}"
+        )
+
+    if user_to > file_to_date:
+        raise ValueError(
+            f"To Date ({custom_to_date}) is after the file's end date ({file_to_date:%Y-%m-%d}). "
+            f"File contains data from {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}"
+        )
+
+    print(f"[validate_date_range] ✅ User date range validated: {user_from:%Y-%m-%d} to {user_to:%Y-%m-%d}")
+    print(f"[validate_date_range] File date range: {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}")
+
+    return user_from, user_to
 
 
 def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
@@ -228,13 +289,36 @@ def extract_gp_and_name_from_gprow(row_cells):
 # ========
 #  Main
 # ========
-def clean_daily_inout4(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
+def clean_daily_inout4(
+    input_path: str,
+    output_path: str,
+    company: str = None,
+    branch: str = None,
+    custom_from_date: str = None,
+    custom_to_date: str = None
+) -> pd.DataFrame:
+   """
+   Process attendance file and filter by date range.
+
+   Args:
+       input_path: Path to input Excel file
+       output_path: Path to save cleaned Excel file
+       company: Company name (default: "Vaaman Engineers India Limited")
+       branch: Branch name
+       custom_from_date: User-selected from date (YYYY-MM-DD format, optional)
+       custom_to_date: User-selected to date (YYYY-MM-DD format, optional)
+
+   Returns:
+       DataFrame with cleaned attendance records
+   """
    print("=" * 80)
    print("[clean_daily_inout4] Starting")
    print(f"[clean_daily_inout4] Input: {input_path}")
    print(f"[clean_daily_inout4] Output: {output_path}")
    print(f"[clean_daily_inout4] Company: {company}")
    print(f"[clean_daily_inout4] Branch: {branch}")
+   print(f"[clean_daily_inout4] Custom From Date: {custom_from_date}")
+   print(f"[clean_daily_inout4] Custom To Date: {custom_to_date}")
    print("=" * 80)
 
    if not os.path.exists(input_path):
@@ -250,10 +334,17 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
    df = pd.read_excel(working_file, header=None, engine="openpyxl", dtype=object)
    print(f"[clean_daily_inout4] Raw shape: {df.shape}")
 
-   # 1) Month/year
-   month_dt = parse_period_month(df)
+   # 1) Parse file date range from header
+   file_from_date, file_to_date = parse_period_month(df)
+   month_dt = file_from_date  # for building date_map (year/month reference)
 
-   # 2) Date row (01..31)
+   # 2) Validate and get final date range to process
+   filter_from_date, filter_to_date = validate_date_range(
+       file_from_date, file_to_date, custom_from_date, custom_to_date
+   )
+   print(f"[clean_daily_inout4] 📅 Processing attendance for: {filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}")
+
+   # 3) Date row (01..31)
    date_row_idx = detect_date_row(df, start=0, max_check=80)
    if date_row_idx is None:
        # try a broader search
@@ -330,6 +421,11 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
 
        # nearest likely day row is above the block; use the global one we already built (date_map)
        for col_idx, date_str in date_map.items():
+           # Check if this date is within the filter range
+           current_date = datetime.strptime(date_str, "%Y-%m-%d")
+           if current_date < filter_from_date or current_date > filter_to_date:
+               continue  # Skip dates outside user-selected range
+
            # per-day values from aligned columns
            in1_val = in1_row.iloc[col_idx] if col_idx < len(in1_row) else None
            out2_val = out2_row.iloc[col_idx] if col_idx < len(out2_row) else None
@@ -391,9 +487,12 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
    )
 
    if df_final.empty:
-       raise ValueError( "❌ No attendance records could be parsed. "
-        "Please check that the uploaded file matches the selected Branch "
-        "and that the file format is correct.")
+       raise ValueError(
+           f"❌ No attendance records found for the selected date range "
+           f"({filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}). "
+           "Please check that the uploaded file matches the selected Branch "
+           "and date range, and that the file format is correct."
+       )
 
    # save
    out_dir = os.path.dirname(output_path)
@@ -401,6 +500,7 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
        os.makedirs(out_dir, exist_ok=True)
    df_final.to_excel(output_path, index=False)
    print(f"[clean_daily_inout4] Saved cleaned file: {output_path}")
+   print(f"[clean_daily_inout4] ✅ Processed {len(df_final)} attendance records for date range: {filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}")
 
    # cleanup temp
    if temp_created and os.path.exists(working_file):

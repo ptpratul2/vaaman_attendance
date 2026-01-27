@@ -351,13 +351,19 @@ def process_uploaded_file(doc, method):
 
             # doc.branch == "HZL Pantnagar" or doc.branch == "HZL Debari O&M" :
         elif doc.branch in hzl:
+            # Convert date fields to string format (YYYY-MM-DD) if they exist
+            from_date = str(doc.custom_from_date) if doc.get('custom_from_date') else None
+            to_date = str(doc.custom_to_date) if doc.get('custom_to_date') else None
+
             clean_daily_inout4(
                 input_path=local_path,
                 output_path=cleaned_path,
                 company=doc.company,
-                branch=doc.branch
+                branch=doc.branch,
+                custom_from_date=from_date,
+                custom_to_date=to_date
             )
-            append_log(doc, "Step 2: Used clean_daily_inout4 for Rudrapur")
+            append_log(doc, f"Step 2: Used clean_daily_inout4 for {doc.branch} (Date range: {from_date} to {to_date})")
             
         elif doc.branch in ["DOLVI","JSW DOLVI","JSW Dolvi BF"]:
             clean_daily_inout13(
