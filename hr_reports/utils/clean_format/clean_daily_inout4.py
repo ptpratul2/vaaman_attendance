@@ -161,7 +161,7 @@ def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
     # prefer in_time if available, else out_time
     hour = in_hour if in_hour is not None else out_hour
     if hour is None:
-        return "G"  # default fallback
+        return ""  # blank cell when no time available
 
     if 6 <= hour < 14:
         return "A"
