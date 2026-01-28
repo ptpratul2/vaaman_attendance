@@ -2,6 +2,94 @@ import os
 import pandas as pd
 import frappe
 from datetime import datetime, timedelta
+from typing import Optional, Tuple
+
+
+# =========================
+#  Date Range Helpers
+# =========================
+def parse_file_date_range(df: pd.DataFrame, date_column: str = "Date In") -> Tuple[datetime, datetime]:
+    """
+    Extract min and max dates from the Date In column.
+    Returns: (from_date, to_date)
+    """
+    if date_column not in df.columns:
+        raise ValueError(f"Column '{date_column}' not found in file")
+
+    # Parse all dates in the column
+    dates = pd.to_datetime(df[date_column], dayfirst=True, errors='coerce')
+    valid_dates = dates.dropna()
+
+    if valid_dates.empty:
+        # Fallback: use current month
+        today = datetime.today()
+        from_date = datetime(today.year, today.month, 1)
+        if today.month == 12:
+            to_date = datetime(today.year, 12, 31)
+        else:
+            to_date = datetime(today.year, today.month + 1, 1) - timedelta(days=1)
+        print(f"[parse_file_date_range] No valid dates found. Using current month: {from_date:%Y-%m-%d} to {to_date:%Y-%m-%d}")
+        return from_date, to_date
+
+    from_date = valid_dates.min().to_pydatetime()
+    to_date = valid_dates.max().to_pydatetime()
+
+    print(f"[parse_file_date_range] File date range: {from_date:%Y-%m-%d} to {to_date:%Y-%m-%d}")
+    return from_date, to_date
+
+
+def validate_date_range(
+    file_from_date: datetime,
+    file_to_date: datetime,
+    custom_from_date: Optional[str],
+    custom_to_date: Optional[str]
+) -> Tuple[datetime, datetime]:
+    """
+    Validate user-selected date range against file date range.
+    Args:
+        file_from_date: Start date from file
+        file_to_date: End date from file
+        custom_from_date: User-selected from date (YYYY-MM-DD string or None)
+        custom_to_date: User-selected to date (YYYY-MM-DD string or None)
+    Returns:
+        (validated_from_date, validated_to_date) as datetime objects
+    Raises:
+        ValueError: If user dates are outside file date range
+    """
+    # If no custom dates provided, use file dates
+    if not custom_from_date or not custom_to_date:
+        print(f"[validate_date_range] No custom dates provided. Using file dates: {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}")
+        return file_from_date, file_to_date
+
+    # Parse custom dates
+    try:
+        user_from = datetime.strptime(custom_from_date, "%Y-%m-%d")
+        user_to = datetime.strptime(custom_to_date, "%Y-%m-%d")
+    except Exception as e:
+        raise ValueError(f"Invalid date format. Expected YYYY-MM-DD. Error: {e}")
+
+    # Validate user_from <= user_to
+    if user_from > user_to:
+        raise ValueError(f"From Date ({custom_from_date}) cannot be after To Date ({custom_to_date})")
+
+    # Validate dates are within file range
+    if user_from < file_from_date:
+        raise ValueError(
+            f"From Date ({custom_from_date}) is before the file's start date ({file_from_date:%Y-%m-%d}). "
+            f"File contains data from {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}"
+        )
+
+    if user_to > file_to_date:
+        raise ValueError(
+            f"To Date ({custom_to_date}) is after the file's end date ({file_to_date:%Y-%m-%d}). "
+            f"File contains data from {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}"
+        )
+
+    print(f"[validate_date_range] User date range validated: {user_from:%Y-%m-%d} to {user_to:%Y-%m-%d}")
+    print(f"[validate_date_range] File date range: {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}")
+
+    return user_from, user_to
+
 
 def format_datetime(date_val, time_val):
     """
@@ -263,35 +351,53 @@ def merge_overlapping_attendances(df):
         shift_series = group['Shift'].replace("", pd.NA).dropna()
         shift = shift_series.iloc[0] if not shift_series.empty else ""
 
-        # Convert to both formats: string for display, float for Frappe
-        work_hrs_str = _seconds_to_workhrs(total_seconds)
-        work_hrs_decimal = _seconds_to_decimal_hours(total_seconds)  # Decimal hours for Frappe
-        overtime = _calculate_overtime_from_seconds(total_seconds)
+        # Check if any punch is missing after merge
+        in_punch_missing = earliest_in is None
+        out_punch_missing = latest_out is None
+        any_punch_missing = in_punch_missing or out_punch_missing
 
-        # Status logic based on working hours thresholds (same as clean_daily_inout24.py)
-        status = "Absent"
-        if work_hrs_decimal >= 7.0:
-            status = "Present"
-        elif work_hrs_decimal >= 4.5:
-            status = "Half Day"
-        else:
+        # Working hours - blank if any punch missing
+        if any_punch_missing:
+            work_hrs_decimal = ""
+            work_hrs_str = ""
+            overtime = ""
             status = "Absent"
+        else:
+            # Both punches exist - calculate normally
+            work_hrs_str = _seconds_to_workhrs(total_seconds)
+            work_hrs_decimal = _seconds_to_decimal_hours(total_seconds)
+            overtime = _calculate_overtime_from_seconds(total_seconds)
+
+            # Status logic based on working hours thresholds
+            status = "Absent"
+            if work_hrs_decimal >= 7.0:
+                status = "Present"
+            elif work_hrs_decimal >= 4.5:
+                status = "Half Day"
+
+        # Format In/Out times - blank if missing
+        in_time_display = _format_output_datetime(earliest_in) if earliest_in else ""
+        out_time_display = _format_output_datetime(latest_out) if latest_out else ""
 
         merged_row = {
             'Employee': emp,
             'Attendance Date': date,
             'Employee Name': group.iloc[0]['Employee Name'],
             'Status': status,
-            'In Time': _format_output_datetime(earliest_in) or _first_non_empty(group['In Time']),
-            'Out Time': _format_output_datetime(latest_out) or _first_non_empty(group['Out Time']),
+            'In Time': in_time_display,
+            'Out Time': out_time_display,
             'Company': group.iloc[0]['Company'],
             'Branch': group.iloc[0]['Branch'],
-            'Working Hours': work_hrs_decimal,  # Use decimal hours for Frappe
+            'Working Hours': work_hrs_decimal,
             'Shift': shift,
             'Over Time': overtime
         }
         merged_rows.append(merged_row)
-        print(f"[clean_daily_inout14] Merged {len(group)} punches for {emp} on {date} - Total working hours: {work_hrs_decimal} hours ({work_hrs_str}) (from {len(valid_pairs)} valid in/out pairs)")
+
+        if any_punch_missing:
+            print(f"[clean_daily_inout14] Merged {len(group)} punches for {emp} on {date} - MISSING PUNCH (In: {'Yes' if not in_punch_missing else 'No'}, Out: {'Yes' if not out_punch_missing else 'No'}) → Status: Absent")
+        else:
+            print(f"[clean_daily_inout14] Merged {len(group)} punches for {emp} on {date} - Total working hours: {work_hrs_decimal} hours ({work_hrs_str}) (from {len(valid_pairs)} valid in/out pairs)")
 
     merged_df = pd.DataFrame(merged_rows)
     print(f"[clean_daily_inout14] Merge: Completed. Final count: {len(merged_df)} records")
@@ -299,13 +405,36 @@ def merge_overlapping_attendances(df):
     return merged_df
 
 
-def clean_daily_inout14(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
+def clean_daily_inout14(
+    input_path: str,
+    output_path: str,
+    company: str = None,
+    branch: str = None,
+    custom_from_date: str = None,
+    custom_to_date: str = None
+) -> pd.DataFrame:
+    """
+    Process attendance file and filter by date range.
+
+    Args:
+        input_path: Path to input Excel file
+        output_path: Path to save cleaned Excel file
+        company: Company name
+        branch: Branch name
+        custom_from_date: User-selected from date (YYYY-MM-DD format, optional)
+        custom_to_date: User-selected to date (YYYY-MM-DD format, optional)
+
+    Returns:
+        DataFrame with cleaned attendance records
+    """
     print("=" * 80)
     print("[clean_daily_inout14] Starting")
     print(f"[clean_daily_inout14] Input: {input_path}")
     print(f"[clean_daily_inout14] Output: {output_path}")
     print(f"[clean_daily_inout14] Company: {company}")
     print(f"[clean_daily_inout14] Branch: {branch}")
+    print(f"[clean_daily_inout14] Custom From Date: {custom_from_date}")
+    print(f"[clean_daily_inout14] Custom To Date: {custom_to_date}")
     print("=" * 80)
 
     if not os.path.exists(input_path):
@@ -354,6 +483,15 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
             print(f"  - '{col}'")
         raise ValueError(f"Missing required columns in input: {missing}")
 
+    # 1) Parse file date range from Date In column
+    file_from_date, file_to_date = parse_file_date_range(df_raw, "Date In")
+
+    # 2) Validate and get final date range to process
+    filter_from_date, filter_to_date = validate_date_range(
+        file_from_date, file_to_date, custom_from_date, custom_to_date
+    )
+    print(f"[clean_daily_inout14] Processing attendance for: {filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}")
+
     records = []
     failed_gp_count = 0
     for idx, row in df_raw.iterrows():
@@ -385,15 +523,20 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
                 if failed_gp_count <= 5:  # Only print first 5
                     print(f"[clean_daily_inout14] WARNING: Employee not found for GP No '{gp_no}' (Name: {emp_name}) - Error: {str(e)[:100]}")
 
-        # Format In/Out time
-        in_time_fmt = format_datetime(att_date, time_in) or format_datetime(att_date, "09:00:00")
-        out_time_fmt = format_datetime(att_date, time_out) or format_datetime(att_date, "17:00:00")
+        # Format In/Out time - keep blank if missing (no fake defaults)
+        in_time_fmt = format_datetime(att_date, time_in)  # Returns None if missing
+        out_time_fmt = format_datetime(att_date, time_out)  # Returns None if missing
 
-        # Calculate working hours from in/out times if available, otherwise use Excel value
-        work_hrs_decimal = 0.0
-        if time_in and time_out and pd.notna(time_in) and pd.notna(time_out):
+        # Check if either punch is missing
+        in_punch_missing = in_time_fmt is None
+        out_punch_missing = out_time_fmt is None
+        any_punch_missing = in_punch_missing or out_punch_missing
+
+        # Calculate working hours - blank if any punch is missing
+        work_hrs_decimal = ""  # Default to blank
+        if not any_punch_missing:
+            # Both punches exist - calculate working hours
             try:
-                # Try to calculate from in/out times
                 in_dt = parse_time_to_datetime(
                     pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
                     in_time_fmt
@@ -410,21 +553,24 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
             except Exception:
                 # Fallback to Excel value
                 work_hrs_decimal = _to_float_workhrs(work_hrs)
-        else:
-            # Use Excel value converted to decimal
-            work_hrs_decimal = _to_float_workhrs(work_hrs)
+        # If any punch missing, work_hrs_decimal stays blank ("")
 
-        # Status logic based on working hours thresholds (same as clean_daily_inout24.py)
-        status = "Absent"
-        if work_hrs_decimal >= 7.0:
-            status = "Present"
-        elif work_hrs_decimal >= 4.5:
-            status = "Half Day"
-        else:
+        # Status logic
+        if any_punch_missing:
+            # Missing punch = Absent
             status = "Absent"
+        else:
+            # Both punches exist - calculate status from working hours
+            status = "Absent"
+            if isinstance(work_hrs_decimal, (int, float)) and work_hrs_decimal >= 7.0:
+                status = "Present"
+            elif isinstance(work_hrs_decimal, (int, float)) and work_hrs_decimal >= 4.5:
+                status = "Half Day"
 
-        # Overtime calculation (using decimal hours)
-        overtime_val = _calculate_overtime_from_seconds(work_hrs_decimal * 3600) if work_hrs_decimal > 0 else ""
+        # Overtime calculation (using decimal hours) - blank if working hours is blank
+        overtime_val = ""
+        if isinstance(work_hrs_decimal, (int, float)) and work_hrs_decimal > 0:
+            overtime_val = _calculate_overtime_from_seconds(work_hrs_decimal * 3600)
 
         # Parse attendance date
         parsed_date = pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else ""
@@ -433,16 +579,25 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
         if idx < 5:
             print(f"[DEBUG] Row {idx}: Parsed 'Attendance Date': {parsed_date}")
 
+        # Filter by date range
+        if parsed_date:
+            try:
+                current_date = datetime.strptime(parsed_date, "%Y-%m-%d")
+                if current_date < filter_from_date or current_date > filter_to_date:
+                    continue  # Skip dates outside user-selected range
+            except Exception:
+                pass  # If date parsing fails, include the record
+
         rec = {
             "Attendance Date": parsed_date,
             "Employee": employee_id if employee_id else "",
             "Employee Name": emp_name,
             "Status": status,
-            "In Time": in_time_fmt,
-            "Out Time": out_time_fmt,
+            "In Time": in_time_fmt if in_time_fmt else "",  # Blank if missing
+            "Out Time": out_time_fmt if out_time_fmt else "",  # Blank if missing
             "Company": company if company else "",
             "Branch": branch if branch else "",
-            "Working Hours": work_hrs_decimal,  # Use decimal hours for Frappe
+            "Working Hours": work_hrs_decimal,  # Blank if punch missing, decimal hours otherwise
             "Shift": shift if shift else "",
             "Over Time": overtime_val
         }
@@ -454,22 +609,46 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
     if failed_gp_count > 0:
         print(f"[clean_daily_inout14] Total GP Numbers not found: {failed_gp_count}")
 
-    # Debug: Check Employee column before drop
+    # Check for records with missing Employee ID (GP No not found in master)
+    # These will cause Data Import errors - which is correct behavior
     empty_employees = df_final[df_final['Employee'].isna() | (df_final['Employee'] == '')]
     if not empty_employees.empty:
-        print(f"[clean_daily_inout14] WARNING: Found {len(empty_employees)} rows with missing Employee ID")
+        print(f"[clean_daily_inout14] INFO: {len(empty_employees)} records have missing Employee ID (GP No not in Employee master)")
+        print(f"[clean_daily_inout14] INFO: These will show as errors in Data Import - please add missing GP Numbers to Employee master")
+        # Log first 10 missing GP Numbers for reference
+        for idx, row in empty_employees.head(10).iterrows():
+            print(f"  - GP No not found: {row.get('Employee Name', 'Unknown')} on {row.get('Attendance Date', 'Unknown')}")
+        if len(empty_employees) > 10:
+            print(f"  ... and {len(empty_employees) - 10} more")
 
-    # Drop invalid
-    df_final = df_final.dropna(subset=["Attendance Date", "Employee"], how="any")
-    df_final = df_final[df_final['Employee'] != '']  # Also remove empty strings
-    print(f"[clean_daily_inout14] After dropping invalid: {len(df_final)} rows (before merging)")
+    # Only drop records with missing Attendance Date (invalid data)
+    # Keep records with missing Employee - Data Import will show the error
+    df_final = df_final.dropna(subset=["Attendance Date"], how="any")
+    print(f"[clean_daily_inout14] After dropping invalid dates: {len(df_final)} rows (before merging)")
 
     # Merge overlapping attendances
+    # Only merge records WITH Employee ID - records without Employee are kept as-is
     if not df_final.empty:
         print(f"[clean_daily_inout14] Starting merge process...")
+
+        # Separate records with and without Employee
+        has_employee = df_final[df_final['Employee'].notna() & (df_final['Employee'] != '')]
+        no_employee = df_final[df_final['Employee'].isna() | (df_final['Employee'] == '')]
+
+        print(f"[clean_daily_inout14] Records with Employee: {len(has_employee)}, Records without Employee: {len(no_employee)}")
+
         try:
-            df_final = merge_overlapping_attendances(df_final)
-            print(f"[clean_daily_inout14] After merging overlaps: {len(df_final)} rows")
+            # Only merge records that have Employee ID
+            if not has_employee.empty:
+                merged_with_emp = merge_overlapping_attendances(has_employee)
+                print(f"[clean_daily_inout14] After merging (with Employee): {len(merged_with_emp)} rows")
+            else:
+                merged_with_emp = has_employee
+
+            # Combine: merged records + unmerged records (no Employee)
+            df_final = pd.concat([merged_with_emp, no_employee], ignore_index=True)
+            print(f"[clean_daily_inout14] Total after merge: {len(df_final)} rows")
+
         except Exception as e:
             print(f"[clean_daily_inout14] ERROR in merge function: {str(e)}")
             import traceback
@@ -477,7 +656,12 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
             print(f"[clean_daily_inout14] Continuing without merge...")
 
     if df_final.empty:
-        raise ValueError("No attendance records parsed from Daily In-Out report.")
+        raise ValueError(
+            f"No attendance records found for the selected date range "
+            f"({filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}). "
+            "Please check that the uploaded file matches the selected Branch "
+            "and date range, and that the file format is correct."
+        )
 
     out_dir = os.path.dirname(output_path)
     if out_dir and not os.path.exists(out_dir):
@@ -485,6 +669,7 @@ def clean_daily_inout14(input_path: str, output_path: str, company: str = None, 
 
     df_final.to_excel(output_path, index=False)
     print(f"[clean_daily_inout14] Saved output to: {output_path}")
+    print(f"[clean_daily_inout14] Processed {len(df_final)} attendance records for date range: {filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}")
     print("[clean_daily_inout14] Done ✅")
 
     return df_final

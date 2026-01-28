@@ -332,13 +332,19 @@ def process_uploaded_file(doc, method):
 
         # Choose cleaning function based on Branch
         if doc.branch in ["Vedanta Jharsuguda P2","Vedanta Jharsuguda P1"]:
+            # Convert date fields to string format (YYYY-MM-DD) if they exist
+            from_date = str(doc.custom_from_date) if doc.get('custom_from_date') else None
+            to_date = str(doc.custom_to_date) if doc.get('custom_to_date') else None
+
             clean_daily_inout14(
                 input_path=local_path,
                 output_path=cleaned_path,
                 company=doc.company,
-                branch=doc.branch
+                branch=doc.branch,
+                custom_from_date=from_date,
+                custom_to_date=to_date
             )
-            append_log(doc, "Step 2: Used clean_daily_inout14 (multi-punch merge) for Vedanta Plant II")
+            append_log(doc, f"Step 2: Used clean_daily_inout14 (multi-punch merge) for Vedanta (Date range: {from_date} to {to_date})")
 
         elif doc.branch == "Vedanta Lanjigarh":
             clean_daily_inout24(
