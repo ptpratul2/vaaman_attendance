@@ -3,7 +3,93 @@ import os
 import pandas as pd
 import frappe
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple
+
+
+# =========================
+#  Date Range Helpers
+# =========================
+def parse_file_date_range(df: pd.DataFrame, date_column: str = "Date") -> Tuple[datetime, datetime]:
+    """
+    Extract min and max dates from the Date column.
+    Returns: (from_date, to_date)
+    """
+    if date_column not in df.columns:
+        raise ValueError(f"Column '{date_column}' not found in file")
+
+    # Parse all dates in the column
+    dates = pd.to_datetime(df[date_column], dayfirst=True, errors='coerce')
+    valid_dates = dates.dropna()
+
+    if valid_dates.empty:
+        # Fallback: use current month
+        today = datetime.today()
+        from_date = datetime(today.year, today.month, 1)
+        if today.month == 12:
+            to_date = datetime(today.year, 12, 31)
+        else:
+            to_date = datetime(today.year, today.month + 1, 1) - timedelta(days=1)
+        print(f"[parse_file_date_range] No valid dates found. Using current month: {from_date:%Y-%m-%d} to {to_date:%Y-%m-%d}")
+        return from_date, to_date
+
+    from_date = valid_dates.min().to_pydatetime()
+    to_date = valid_dates.max().to_pydatetime()
+
+    print(f"[parse_file_date_range] File date range: {from_date:%Y-%m-%d} to {to_date:%Y-%m-%d}")
+    return from_date, to_date
+
+
+def validate_date_range(
+    file_from_date: datetime,
+    file_to_date: datetime,
+    custom_from_date: Optional[str],
+    custom_to_date: Optional[str]
+) -> Tuple[datetime, datetime]:
+    """
+    Validate user-selected date range against file date range.
+    Args:
+        file_from_date: Start date from file
+        file_to_date: End date from file
+        custom_from_date: User-selected from date (YYYY-MM-DD string or None)
+        custom_to_date: User-selected to date (YYYY-MM-DD string or None)
+    Returns:
+        (validated_from_date, validated_to_date) as datetime objects
+    Raises:
+        ValueError: If user dates are outside file date range
+    """
+    # If no custom dates provided, use file dates
+    if not custom_from_date or not custom_to_date:
+        print(f"[validate_date_range] No custom dates provided. Using file dates: {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}")
+        return file_from_date, file_to_date
+
+    # Parse custom dates
+    try:
+        user_from = datetime.strptime(custom_from_date, "%Y-%m-%d")
+        user_to = datetime.strptime(custom_to_date, "%Y-%m-%d")
+    except Exception as e:
+        raise ValueError(f"Invalid date format. Expected YYYY-MM-DD. Error: {e}")
+
+    # Validate user_from <= user_to
+    if user_from > user_to:
+        raise ValueError(f"From Date ({custom_from_date}) cannot be after To Date ({custom_to_date})")
+
+    # Validate dates are within file range
+    if user_from < file_from_date:
+        raise ValueError(
+            f"From Date ({custom_from_date}) is before the file's start date ({file_from_date:%Y-%m-%d}). "
+            f"File contains data from {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}"
+        )
+
+    if user_to > file_to_date:
+        raise ValueError(
+            f"To Date ({custom_to_date}) is after the file's end date ({file_to_date:%Y-%m-%d}). "
+            f"File contains data from {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}"
+        )
+
+    print(f"[validate_date_range] User date range validated: {user_from:%Y-%m-%d} to {user_to:%Y-%m-%d}")
+    print(f"[validate_date_range] File date range: {file_from_date:%Y-%m-%d} to {file_to_date:%Y-%m-%d}")
+
+    return user_from, user_to
 
 # =========================
 #  .xls -> .xlsx conversion
@@ -215,11 +301,34 @@ def calculate_overtime(working_hours: float) -> str:
     return overtime
 
 
-def clean_daily_inout10(input_path: str, output_path: str, company: str = None, branch: str = None) -> pd.DataFrame:
+def clean_daily_inout10(
+    input_path: str,
+    output_path: str,
+    company: str = None,
+    branch: str = None,
+    custom_from_date: str = None,
+    custom_to_date: str = None
+) -> pd.DataFrame:
+    """
+    Process attendance file and filter by date range.
+
+    Args:
+        input_path: Path to input Excel file
+        output_path: Path to save cleaned Excel file
+        company: Company name
+        branch: Branch name
+        custom_from_date: User-selected from date (YYYY-MM-DD format, optional)
+        custom_to_date: User-selected to date (YYYY-MM-DD format, optional)
+
+    Returns:
+        DataFrame with cleaned attendance records
+    """
     print("="*80)
     print("[clean_daily_inout10] Starting")
     print(f"Input: {input_path}, Output: {output_path}")
     print(f"Company: {company}, Branch: {branch}")
+    print(f"Custom From Date: {custom_from_date}")
+    print(f"Custom To Date: {custom_to_date}")
     print("="*80)
 
     if not os.path.exists(input_path):
@@ -290,8 +399,18 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
     if missing:
         raise ValueError(f"Missing required columns in input: {missing}")
 
+    # 1) Parse file date range from Date column
+    file_from_date, file_to_date = parse_file_date_range(df_raw, "Date")
+
+    # 2) Validate and get final date range to process
+    filter_from_date, filter_to_date = validate_date_range(
+        file_from_date, file_to_date, custom_from_date, custom_to_date
+    )
+    print(f"[clean_daily_inout10] Processing attendance for: {filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}")
+
     records = []
     not_found_count = 0
+    skipped_date_count = 0
     for _, row in df_raw.iterrows():
         attendance_device_id = row.get("Employee ID") if pd.notna(row.get("Employee ID")) else None
         emp_name = str(row.get("Employee Name")).strip() if pd.notna(row.get("Employee Name")) else None
@@ -361,8 +480,21 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
             print(f"⚠️  SKIPPING row without Employee ID: {emp_name} on {att_date}")
             continue
 
+        # Parse attendance date and filter by date range
+        parsed_date = pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else ""
+
+        # Filter by date range
+        if parsed_date:
+            try:
+                current_date = datetime.strptime(parsed_date, "%Y-%m-%d")
+                if current_date < filter_from_date or current_date > filter_to_date:
+                    skipped_date_count += 1
+                    continue  # Skip dates outside user-selected range
+            except Exception:
+                pass  # If date parsing fails, include the record
+
         rec = {
-            "Attendance Date": pd.to_datetime(att_date, dayfirst=True).strftime("%Y-%m-%d") if pd.notna(att_date) else "",
+            "Attendance Date": parsed_date,
             "Employee": employee_id,
             "Employee Name": emp_name,
             "Status": status,
@@ -383,8 +515,16 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
     if not_found_count > 0:
         print(f"[clean_daily_inout10] ⚠️  Warning: {not_found_count} attendance device IDs not found in Employee master")
 
+    if skipped_date_count > 0:
+        print(f"[clean_daily_inout10] Skipped {skipped_date_count} records outside date range ({filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d})")
+
     if df_final.empty:
-        raise ValueError("No attendance records parsed from Daily In-Out report.")
+        raise ValueError(
+            f"No attendance records found for the selected date range "
+            f"({filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}). "
+            "Please check that the uploaded file matches the selected Branch "
+            "and date range, and that the file format is correct."
+        )
 
     out_dir = os.path.dirname(output_path)
     if out_dir and not os.path.exists(out_dir):
@@ -392,6 +532,7 @@ def clean_daily_inout10(input_path: str, output_path: str, company: str = None, 
 
     df_final.to_excel(output_path, index=False)
     print(f"[clean_daily_inout10] Saved output to: {output_path}")
+    print(f"[clean_daily_inout10] Processed {len(df_final)} attendance records for date range: {filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d}")
 
     # Cleanup temporary file if created
     if temp_created and os.path.exists(working_file):
