@@ -128,6 +128,9 @@ def convert_xls_to_xlsx(xls_path: str) -> str:
 
 
 def format_datetime(date_val, time_val):
+    """
+    Format date and time to 24-hour format: YYYY-MM-DD HH:MM:SS
+    """
     if pd.isna(date_val):
         return None
 
@@ -145,7 +148,7 @@ def format_datetime(date_val, time_val):
         try:
             t_str = str(time_val).strip()
             if not t_str or t_str.lower() in ["nan", "none"]:
-                return None 
+                return None
             parts = t_str.replace(".", ":").split(":")
             hours = int(parts[0])
             minutes = int(parts[1]) if len(parts) > 1 else 0
@@ -153,25 +156,18 @@ def format_datetime(date_val, time_val):
         except Exception:
             return None
 
-    suffix = "AM"
-    if hours >= 12:
-        suffix = "PM"
-        if hours > 12:
-            hours -= 12
-    elif hours == 0:
-        hours = 12
-
+    # Keep 24-hour format (no conversion to 12-hour)
     return date_val.strftime("%Y-%m-%d") + f" {hours:02d}:{minutes:02d}:{seconds:02d}"
 
 def calculate_working_hours(intime_str: str, outtime_str: str) -> tuple:
     """
     Calculate working hours from intime and outtime strings.
-    Returns: (decimal_hours, total_hours)
-
-    Logic from clean_daily_inout7.py
+    Returns: (display_hours, total_seconds)
+    - display_hours: HH.MM format (e.g., 8.14 = 8 hours 14 minutes)
+    - total_seconds: raw seconds for status/overtime calculations
     """
     if not intime_str or not outtime_str:
-        return None, 0.0
+        return None, 0
 
     try:
         # Parse datetime strings (format: "YYYY-MM-DD HH:MM:SS")
@@ -179,21 +175,22 @@ def calculate_working_hours(intime_str: str, outtime_str: str) -> tuple:
         outtime_dt = datetime.strptime(outtime_str, "%Y-%m-%d %H:%M:%S")
 
         # If outtime is earlier than intime, assume it's next day
-        if outtime_dt < intime_dt:
+        if outtime_dt <= intime_dt:
             outtime_dt += timedelta(days=1)
 
         # Calculate difference
         diff = outtime_dt - intime_dt
         total_seconds = diff.total_seconds()
-        hours = total_seconds / 3600
 
-        # Format as decimal (e.g., 8.50)
-        decimal_hours = round(hours, 2)
+        # Format as HH.MM (e.g., 8.14 = 8 hours 14 minutes)
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+        display_hours = float(f"{hours}.{minutes:02d}")
 
-        return decimal_hours, hours
+        return display_hours, total_seconds
     except Exception as e:
         print(f"[clean_daily_inout10] Error calculating hours: {e}")
-        return None, 0.0
+        return None, 0
 
 def _to_float_workhrs(time_val):
     if not time_val or str(time_val).lower() in ["nan", "none"]:
@@ -219,14 +216,14 @@ def _to_float_workhrs(time_val):
 
 
 
-def determine_status(working_hours: float, total_hours: float) -> str:
+def determine_status(total_seconds: float) -> str:
     """
     Determine status based on working hours.
-    Logic from clean_daily_inout7.py:
     - >= 7 hours: Present
     - >= 4.5 hours: Half Day
     - < 4.5 hours: Absent
     """
+    total_hours = total_seconds / 3600 if total_seconds > 0 else 0
     if total_hours >= 7.0:
         return "Present"
     elif total_hours >= 4.5:
@@ -236,15 +233,11 @@ def determine_status(working_hours: float, total_hours: float) -> str:
 
 def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
     """
-    Detect shift with 1-hour grace period for late arrivals.
-
-    Shift timings with grace:
-    - Shift C (Night): 21:00 (9 PM) to 07:00 (7 AM) - includes 1hr grace
-    - Shift A (Day): 05:00 (5 AM) to 15:00 (3 PM) - includes 1hr grace
-    - Shift B (Evening): 13:00 (1 PM) to 23:00 (11 PM) - includes 1hr grace
-    - Shift G (General): Everything else or late entries
-
-    Priority: C > A > B > G (to handle overlaps)
+    Detect shift based on In Time hour.
+    Shift A: 5:00 AM - 7:00 AM (hours 5, 6, 7)
+    Shift G: 8:00 AM - 10:00 AM (hours 8, 9, 10)
+    Shift B: 1:00 PM - 3:00 PM (hours 13, 14, 15)
+    Shift C: 9:00 PM - 11:00 PM (hours 21, 22, 23)
     """
     def get_hour(ts: Optional[str]) -> Optional[int]:
         if not ts or str(ts).strip() == "" or pd.isna(ts):
@@ -257,48 +250,146 @@ def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
     in_hour = get_hour(in_time)
     out_hour = get_hour(out_time)
 
-    # Use IN time primarily, fallback to OUT time
     hour = in_hour if in_hour is not None else out_hour
     if hour is None:
-        return "G"
+        return ""
 
-    # Shift C (Night): 21:00-07:00 (with 1hr grace before/after)
-    # Check C first because night shift workers might punch late in morning
-    if hour >= 21 or hour <= 7:
-        return "C"
-
-    # Shift A (Day): 05:00-15:00 (6 AM start + 1hr grace = 5-7, 2 PM end + 1hr = up to 3 PM)
-    # But exclude early morning (already handled by C)
-    elif 7 < hour < 15:
+    if 5 <= hour <= 7:        # 5 AM - 7 AM
         return "A"
-
-    # Shift B (Evening): 13:00-23:00 (2 PM start - 1hr = 1 PM, 10 PM end + 1hr = 11 PM)
-    # But exclude overlap with A (before 3 PM)
-    elif 15 <= hour < 21:
+    elif 8 <= hour <= 10:     # 8 AM - 10 AM
+        return "G"
+    elif 13 <= hour <= 15:    # 1 PM - 3 PM
         return "B"
+    elif 21 <= hour <= 23:    # 9 PM - 11 PM
+        return "C"
+    return ""
 
-    # General shift for anything else
-    return "G"
-
-def calculate_overtime(working_hours: float) -> str:
+def calculate_overtime(total_seconds: float, shift: str) -> str:
     """
     Calculate overtime based on working hours.
-    Logic from clean_daily_inout7.py:
-    - All shifts considered as 9 hours
+    - Shift hours: 8 hours + 1 hour grace = 9 hours threshold
     - OT = Working Hours - 9
     - If OT is negative or less than 1 hour, return blank
+    - Returns HH.MM format (e.g., 1.30 = 1 hour 30 minutes)
     """
-    if working_hours <= 0:
+    if total_seconds <= 0:
         return ""
 
-    shift_hrs = 9  # All shifts are 9 hours
-    overtime = round(working_hours - shift_hrs, 2)
+    total_hours = total_seconds / 3600
+    shift_hrs = {"A": 8, "B": 8, "C": 8, "G": 8}.get(str(shift).upper(), 8)
+    ot_hours = total_hours - shift_hrs - 1  # 1 hour grace
 
-    # If OT is negative or less than 1 hour, return blank
-    if overtime < 1:
+    if ot_hours < 1:
         return ""
 
-    return overtime
+    # Convert to HH.MM format
+    ot_hrs = int(ot_hours)
+    ot_mins = int((ot_hours - ot_hrs) * 60)
+    return float(f"{ot_hrs}.{ot_mins:02d}")
+
+
+def parse_time_to_datetime(date_str, time_str):
+    """Parse date and time string to datetime object"""
+    try:
+        if pd.isna(date_str) or not date_str:
+            return None
+        if pd.isna(time_str) or not time_str:
+            return None
+
+        date_obj = pd.to_datetime(date_str).date()
+        time_parts = str(time_str).strip().split()
+        if len(time_parts) < 2:
+            return None
+
+        time_part = time_parts[1]  # HH:MM:SS
+        h, m, s = map(int, time_part.split(':'))
+
+        return datetime.combine(date_obj, datetime.min.time().replace(hour=h, minute=m, second=s))
+    except Exception:
+        return None
+
+
+def merge_first_in_last_out(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merge multiple punches per Employee+Date into single record.
+    Uses First In Time and Last Out Time.
+    """
+    if df.empty:
+        return df
+
+    print(f"[clean_daily_inout10] Merge: Processing {len(df)} records...")
+
+    # Parse In/Out times to datetime for comparison
+    df['_in_dt'] = df.apply(
+        lambda r: parse_time_to_datetime(r['Attendance Date'], r['In Time']) if r['In Time'] else None,
+        axis=1
+    )
+    df['_out_dt'] = df.apply(
+        lambda r: parse_time_to_datetime(r['Attendance Date'], r['Out Time']) if r['Out Time'] else None,
+        axis=1
+    )
+
+    merged_rows = []
+
+    for (emp, date), group in df.groupby(['Employee', 'Attendance Date']):
+        if not emp or not date:
+            continue
+
+        # Get First In (earliest) and Last Out (latest)
+        in_times = group['_in_dt'].dropna()
+        out_times = group['_out_dt'].dropna()
+
+        first_in = in_times.min() if not in_times.empty else None
+        last_out = out_times.max() if not out_times.empty else None
+
+        # Handle overnight: if last_out <= first_in, add 1 day to out
+        if first_in and last_out and last_out <= first_in:
+            last_out = last_out + timedelta(days=1)
+
+        # Calculate working hours
+        work_hrs_display = ""
+        total_seconds = 0
+        if first_in and last_out:
+            total_seconds = (last_out - first_in).total_seconds()
+            if total_seconds > 0:
+                hours = int(total_seconds // 3600)
+                minutes = int((total_seconds % 3600) // 60)
+                work_hrs_display = float(f"{hours}.{minutes:02d}")
+
+        # Calculate status
+        status = determine_status(total_seconds)
+
+        # Format times for output
+        first_in_str = first_in.strftime("%Y-%m-%d %H:%M:%S") if first_in else ""
+        last_out_str = last_out.strftime("%Y-%m-%d %H:%M:%S") if last_out else ""
+
+        # Detect shift from first in time
+        shift = detect_shift(first_in_str, last_out_str)
+
+        # Calculate overtime
+        overtime_val = calculate_overtime(total_seconds, shift)
+
+        merged_row = {
+            'Attendance Date': date,
+            'Employee': emp,
+            'Employee Name': group.iloc[0]['Employee Name'],
+            'Status': status,
+            'In Time': first_in_str,
+            'Out Time': last_out_str,
+            'Company': group.iloc[0]['Company'],
+            'Branch': group.iloc[0]['Branch'],
+            'Working Hours': work_hrs_display,
+            'Shift': shift,
+            'Over Time': overtime_val
+        }
+        merged_rows.append(merged_row)
+
+        print(f"[clean_daily_inout10] Merged {len(group)} punches for {emp} on {date} -> First In: {first_in_str}, Last Out: {last_out_str}, Hours: {work_hrs_display}")
+
+    merged_df = pd.DataFrame(merged_rows)
+    print(f"[clean_daily_inout10] Merge complete: {len(df)} records -> {len(merged_df)} merged records")
+
+    return merged_df
 
 
 def clean_daily_inout10(
@@ -455,25 +546,26 @@ def clean_daily_inout10(
 
         # Calculate working hours from punch times
         if in_time_fmt and out_time_fmt:
-            calc_work_hrs, total_hours = calculate_working_hours(in_time_fmt, out_time_fmt)
+            work_hrs, total_seconds = calculate_working_hours(in_time_fmt, out_time_fmt)
 
-            if calc_work_hrs is not None:
-                work_hrs = calc_work_hrs
-                # Determine status based on calculated hours
-                status = determine_status(work_hrs, total_hours)
+            if work_hrs is not None:
+                # Determine status based on total seconds
+                status = determine_status(total_seconds)
             else:
                 work_hrs = ""
+                total_seconds = 0
                 status = "Absent"
         else:
             # Missing punch time - mark as Absent with blank hours
             work_hrs = ""
+            total_seconds = 0
             status = "Absent"
 
         # Auto-detect shift from punch times
         shift = detect_shift(in_time_fmt, out_time_fmt)
 
         # Calculate overtime
-        overtime_val = calculate_overtime(work_hrs) if (work_hrs and work_hrs > 0) else ""
+        overtime_val = calculate_overtime(total_seconds, shift)
 
         # Skip rows without Employee ID - cannot import without it
         if not employee_id:
@@ -509,14 +601,22 @@ def clean_daily_inout10(
         records.append(rec)
 
     df_final = pd.DataFrame.from_records(records)
+    print(f"[clean_daily_inout10] Built DataFrame with {len(df_final)} rows (before merge)")
+
+    # Drop records with missing Employee ID
     df_final = df_final.dropna(subset=["Attendance Date", "Employee"], how="any")
-    print(f"[clean_daily_inout10] Built final DataFrame with {len(df_final)} rows")
+    df_final = df_final[df_final['Employee'] != '']
+    print(f"[clean_daily_inout10] After dropping invalid records: {len(df_final)} rows")
 
     if not_found_count > 0:
         print(f"[clean_daily_inout10] ⚠️  Warning: {not_found_count} attendance device IDs not found in Employee master")
 
     if skipped_date_count > 0:
         print(f"[clean_daily_inout10] Skipped {skipped_date_count} records outside date range ({filter_from_date:%Y-%m-%d} to {filter_to_date:%Y-%m-%d})")
+
+    # Merge multiple punches per Employee+Date into First In, Last Out
+    if not df_final.empty:
+        df_final = merge_first_in_last_out(df_final)
 
     if df_final.empty:
         raise ValueError(
