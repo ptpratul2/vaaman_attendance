@@ -67,14 +67,6 @@ def format_datetime(date_val, time_val):
         except Exception:
             return None
 
-    suffix = "AM"
-    if hours >= 12:
-        suffix = "PM"
-        if hours > 12:
-            hours -= 12
-    elif hours == 0:
-        hours = 12
-
     return date_val.strftime("%Y-%m-%d") + f" {hours:02d}:{minutes:02d}:{seconds:02d}"
 
 def calculate_working_hours(intime_str: str, outtime_str: str) -> tuple:

@@ -384,7 +384,7 @@ def process_uploaded_file(doc, method):
                 company=doc.company,
                 branch=doc.branch
             )
-            append_log(doc, "Step 2: Used clean_daily_inout10 for Balco")
+            append_log(doc, f"Step 2: Used clean_daily_inout10 for Balco")
 
         elif doc.branch in ["STL Jharsuguda"]:
             clean_daily_inout2(
