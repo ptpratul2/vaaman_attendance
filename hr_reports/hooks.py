@@ -29,7 +29,14 @@ fixtures = [
         "filters": {
             "name": ["=", "HR Reports"]
         }
-    }
+    },
+    {
+          "doctype": "Crystal Attendance Upload",
+          "filters": {
+              "name": ["in", ["custom_from_date","custom_to_date"]]
+          }
+      }
+
 ]
 
 # Apps
