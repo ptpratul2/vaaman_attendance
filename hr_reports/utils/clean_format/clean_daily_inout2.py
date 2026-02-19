@@ -99,20 +99,26 @@ def detect_shift(in_time: Optional[str]) -> str:
 
     hour = get_hour(in_time)
     if hour is None:
-        return "G"
+        return ""
 
-    # Shift C (Night): 21:00-07:00 (with 1hr grace before/after)
-    if hour >= 21 or hour <= 7:
-        return "C"
-    # Shift A (Day): 05:00-15:00
-    elif 7 < hour < 15:
-        return "A"
-    # Shift B (Evening): 13:00-23:00
-    elif 15 <= hour < 21:
-        return "B"
+    _SHIFT_RANGES = {"A": (5, 7), "G": (8, 10), "B": (13, 15), "C": (21, 23)}
 
-    # General shift for anything else
-    return "G"
+    # Exact range match
+    for shift, (lo, hi) in _SHIFT_RANGES.items():
+        if lo <= hour <= hi:
+            return shift
+
+    # Fallback: closest range by nearest endpoint (circular distance)
+    best, best_dist = "G", float("inf")
+    for shift, (lo, hi) in _SHIFT_RANGES.items():
+        d = min(
+            min(abs(hour - lo), 24 - abs(hour - lo)),
+            min(abs(hour - hi), 24 - abs(hour - hi))
+        )
+        if d < best_dist:
+            best_dist = d
+            best = shift
+    return best
 
 
 def calculate_working_hours(intime_str: str, outtime_str: str) -> tuple:
@@ -451,8 +457,8 @@ def clean_daily_inout2(input_path: str, output_path: str, company: str = None, b
                 work_hrs = ""
                 status = "Absent"
 
-            # Auto-detect shift from punch times
-            shift = detect_shift(in_time_str)
+            # Auto-detect shift from punch times — blank if Absent
+            shift = detect_shift(in_time_str) if status != "Absent" else ""
 
             # Calculate overtime
             overtime_val = calculate_overtime(work_hrs) if (work_hrs and work_hrs > 0) else ""
@@ -463,17 +469,17 @@ def clean_daily_inout2(input_path: str, output_path: str, company: str = None, b
                 device_id_str = str(int(float(gate_pass)))
                 employee_id = employee_cache.get(device_id_str)
 
-                if not employee_id:
-                    # Not found by gate pass - use as-is
-                    employee_id = device_id_str
+                if employee_id is None:
+                    # Not found in ERPNext master - leave Employee cell blank
+                    employee_id = ""
                     not_found_count += 1
-                    print(f"⚠️  Gate Pass {device_id_str} NOT found in Frappe - Using gate pass as Employee ID (Employee: {emp_name})")
+                    print(f"⚠️  Gate Pass {device_id_str} NOT found in Frappe - Leaving Employee blank (Employee: {emp_name})")
             except (ValueError, TypeError):
                 print(f"⚠️  Invalid Gate Pass: {gate_pass} (Employee: {emp_name})")
 
-            # Skip rows without Employee ID
-            if not employee_id:
-                print(f"⚠️  SKIPPING row without Employee ID: {emp_name} on {att_date}")
+            # Skip only rows where Gate Pass itself was unparseable (employee_id is still None)
+            if employee_id is None:
+                print(f"⚠️  SKIPPING row with invalid Gate Pass: {emp_name} on {att_date}")
                 continue
 
             rec = {
