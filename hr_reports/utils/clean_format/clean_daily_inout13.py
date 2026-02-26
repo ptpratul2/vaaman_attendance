@@ -120,12 +120,12 @@ def _to_float_workhrs(time_str):
 def map_status(raw_status) -> str:
     s = "" if pd.isna(raw_status) else str(raw_status).strip()
     mapping = {
-        "P": "Present", "POW": "Present",
+        "P": "Present", "POW": "Present", "RL": "Present", "TU": "Present", "QL": "Present",
         "A": "Absent", "AB": "Absent", "O": "Absent",
         "WO": "Holiday", "H": "Holiday",
         "CL": "On Leave", "PL": "On Leave", "SL": "On Leave", "EL": "On Leave", "AP": "On Leave", 
-        "RL": "On Leave", "LWP": "On Leave", "SDL": "On Leave", "QL": "On Leave",
-        "TU": "On Leave", "CO": "On Leave", "TR": "On Leave", "OH": "On Leave",
+        "LWP": "On Leave", "SDL": "On Leave",
+        "CO": "On Leave", "TR": "On Leave", "OH": "On Leave",
         "ML": "On Leave",
         "MIS": "Half Day", "HD": "Half Day", "HALF": "Half Day",
         "E": "Work From Home"

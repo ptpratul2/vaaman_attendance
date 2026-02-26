@@ -192,10 +192,10 @@ def format_timestamp(date_str: str, time_val, is_checkin: bool) -> Optional[str]
 def map_status(raw_status) -> str:
    s = "" if pd.isna(raw_status) else str(raw_status).strip()
    mapping = {
-       "P": "Present", "POW": "Present", "POH": "Present", "PWH": "Present",
+       "P": "Present", "POW": "Present", "POH": "Present", "PWH": "Present", "RL": "Present", "TU": "Present", "QL": "Present",
        "A": "Absent", "A1": "Absent",
        "WO": "Weekly Off", "H": "Holiday",  "HLD": "Holiday", "WOH": "Holiday",
-       "CL": "On Leave", "PL": "On Leave", "SL": "On Leave", "EL": "On Leave", "RL": "On Leave", "LWP": "On Leave", "SDL": "On Leave", "QL": "On Leave", "TU": "On Leave", "CO": "On Leave", "TR": "On Leave", "OH": "On Leave", "ML": "On Leave", "CH": "On Leave", "SCL": "On Leave", "SPL": "On Leave",
+       "CL": "On Leave", "PL": "On Leave", "SL": "On Leave", "EL": "On Leave", "LWP": "On Leave", "SDL": "On Leave", "CO": "On Leave", "TR": "On Leave", "OH": "On Leave", "ML": "On Leave", "CH": "On Leave", "SCL": "On Leave", "SPL": "On Leave",
        "MIS": "Half Day",  "HD": "Half Day", "HALF": "Half Day",
        "WFH": "Work From Home"
    }
