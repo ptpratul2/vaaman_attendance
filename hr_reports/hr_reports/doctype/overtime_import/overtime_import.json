@@ -8,7 +8,8 @@
   "company",
   "branch",
   "attach_jppy",
-  "overtime_import_details"
+  "overtime_import_details",
+  "amended_from"
  ],
  "fields": [
   {
@@ -20,8 +21,10 @@
   {
    "fieldname": "branch",
    "fieldtype": "Link",
+   "in_list_view": 1,
    "label": "Branch",
-   "options": "Branch"
+   "options": "Branch",
+   "reqd": 1
   },
   {
    "fieldname": "attach_jppy",
@@ -33,13 +36,23 @@
    "fieldtype": "Table",
    "label": "Overtime Import Details",
    "options": "Overtime Import Item"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "OverTime Import",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-09-03 17:47:48.982606",
+ "modified": "2026-05-20 11:55:13.319081",
  "modified_by": "Administrator",
  "module": "hr_reports",
  "name": "OverTime Import",

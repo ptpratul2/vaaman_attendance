@@ -14,9 +14,6 @@
     "label": "Month",
     "mandatory": 0,
     "options": "January\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember",
-    "parent": "Monthly Attendance Custom",
-    "parentfield": "filters",
-    "parenttype": "Report",
     "wildcard_filter": 0
    },
    {
@@ -26,9 +23,6 @@
     "label": "Year",
     "mandatory": 0,
     "options": null,
-    "parent": "Monthly Attendance Custom",
-    "parentfield": "filters",
-    "parenttype": "Report",
     "wildcard_filter": 0
    }
   ],
@@ -38,6 +32,7 @@
   "letter_head": null,
   "modified": "2025-08-06 14:36:30.829237",
   "module": "HR",
+  "mq_filters": [],
   "name": "Monthly Attendance Custom",
   "prepared_report": 0,
   "query": null,

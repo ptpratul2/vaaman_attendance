@@ -1,0 +1,13 @@
+[
+ {
+  "docstatus": 0,
+  "doctype": "Client Script",
+  "dt": "OT Adjustment",
+  "enabled": 1,
+  "modified": "2026-05-19 14:28:04.375184",
+  "module": "hr_reports",
+  "name": "Month Field",
+  "script": "frappe.ui.form.on('OT Adjustment', {\n    refresh: function(frm) {\n        setTimeout(function() {\n            var field = frm.fields_dict['month'];\n            if (!field || !field.datepicker) return;\n\n            var months = [\n                \"January\", \"February\", \"March\", \"April\",\n                \"May\", \"June\", \"July\", \"August\",\n                \"September\", \"October\", \"November\", \"December\"\n            ];\n\n            field.datepicker.update({\n                view: 'months',\n                minView: 'months',\n                onSelect: function(fd, date, picker) {\n                    if (!date) return;\n                    var firstDay = new Date(date.getFullYear(), date.getMonth(), 1);\n                    var dateStr = frappe.datetime.obj_to_str(firstDay);\n                    frm.doc.month = dateStr;\n                    frm.dirty();\n                    field.$input.val(months[date.getMonth()] + ' ' + date.getFullYear());\n                    picker.hide();\n                }\n            });\n\n            if (frm.doc.month) {\n                var d = frappe.datetime.str_to_obj(frm.doc.month);\n                if (d) {\n                    field.$input.val(months[d.getMonth()] + ' ' + d.getFullYear());\n                }\n            }\n        }, 300);\n    }\n});\n",
+  "view": "Form"
+ }
+]

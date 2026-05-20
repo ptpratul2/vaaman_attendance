@@ -29,7 +29,12 @@ fixtures = [
         "filters": {
             "name": ["=", "HR Reports"]
         }
+    },
+    {
+        "doctype": "Client Script", 
+        "filters": [["module", "in", ("hr_reports")]]
     }
+
 ]
 
 # Apps
