@@ -28,6 +28,7 @@
    "fieldtype": "Attach"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "overtime_import_details",
    "fieldtype": "Table",
    "label": "Overtime Import Details",

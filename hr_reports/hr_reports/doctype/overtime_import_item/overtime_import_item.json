@@ -14,6 +14,7 @@
  ],
  "fields": [
   {
+   "allow_on_submit": 1,
    "fieldname": "employee",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -21,18 +22,21 @@
    "options": "Employee"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "attendance_date",
    "fieldtype": "Date",
    "in_list_view": 1,
    "label": "Attendance Date"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "over_time",
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Over Time"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "shift",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -40,12 +44,14 @@
    "options": "Shift Type"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "attendance_device_id_biometricrf_tag_id",
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Attendance Device ID (Biometric/RF tag ID)"
   },
   {
+   "allow_on_submit": 1,
    "fieldname": "branch",
    "fieldtype": "Link",
    "label": "Branch",

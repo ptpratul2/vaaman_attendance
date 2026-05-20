@@ -29,6 +29,9 @@ def parse_overtime(raw):
 
 class OverTimeImport(Document):
     def validate(self):
+        if self.docstatus == 1:
+            return  # submitted — preserve child table edits, skip file re-import
+
         if not self.attach_jppy:
             frappe.msgprint("No file attached")
             return
