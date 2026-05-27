@@ -264,7 +264,8 @@ def clean_daily_inout13(input_path: str, output_path: str, company: str = None, 
             "Branch": branch if branch else "",
             "Working Hours": work_hrs,
             "Shift": shift,
-            "Over Time": overtime_val
+            "Over Time": overtime_val,
+            "Leave Type": "",
         }
         records.append(rec)
 

@@ -275,6 +275,12 @@ def map_status(raw_status) -> str:
     return mapping.get(key, s)
 
 
+leave_type_map = {
+    "CL": "Casual Leave", "PL": "Privilege Leave", "SL": "Sick Leave",
+    "ML": "Maternity Leave", "CO": "Compensatory Off", "LWP": "Leave Without Pay",
+}
+
+
 def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
     def get_hour(ts: Optional[str]) -> Optional[int]:
         if not ts or str(ts).strip() == "" or pd.isna(ts):
@@ -360,6 +366,7 @@ def clean_daily_inout11(input_path: str, output_path: str, company: str = None, 
                 continue
 
             status_mapped = map_status(st_val)
+            leave_type = leave_type_map.get("" if pd.isna(st_val) else str(st_val).strip().upper(), "")
             if status_mapped == "Holiday":
                 continue
 
@@ -379,6 +386,7 @@ def clean_daily_inout11(input_path: str, output_path: str, company: str = None, 
                 "Shift": shift_code,
                 "Company": company if company else "Vaaman Engineers India Limited",
                 "Branch": branch if branch else "",
+                "Leave Type": leave_type,
             })
 
     df_final = pd.DataFrame.from_records(records)

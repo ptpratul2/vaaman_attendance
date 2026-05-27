@@ -264,6 +264,11 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
    r = date_row_idx + 1
    total_rows = len(df_raw)
 
+   leave_type_map = {
+       "CL": "Casual Leave", "PL": "Privilege Leave", "SL": "Sick Leave",
+       "ML": "Maternity Leave", "CO": "Compensatory Off", "LWP": "Leave Without Pay",
+   }
+
    status_map = {
        "H": "Holiday",
        "HO": "Holiday",
@@ -351,6 +356,7 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
                continue
            raw_status_s = str(raw_status).strip()
            status_final = status_map.get(raw_status_s, raw_status_s)
+           leave_type = leave_type_map.get(raw_status_s, "")
 
            # Skip records with excluded statuses
            if status_final in excluded_statuses:
@@ -384,6 +390,7 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
                "Over Time": overtime_val,
                "Company": company if company else "Vaaman Engineers India Limited",
                "Branch": branch if branch else "",
+               "Leave Type": leave_type,
            }
            records.append(rec)
 
@@ -398,7 +405,7 @@ def clean_crystal_excel(input_path: str, output_path: str, company: str = None, 
            r += 1
 
    # Use ERPNext Attendance field labels as columns
-   final_cols = ["Attendance Date", "Employee", "Employee Name", "Status", "In Time", "Out Time", "Working Hours", "Over Time", "Company", "Branch"]
+   final_cols = ["Attendance Date", "Employee", "Employee Name", "Status", "In Time", "Out Time", "Working Hours", "Over Time", "Company", "Branch", "Leave Type"]
    df_final = pd.DataFrame.from_records(records, columns=final_cols)
     # Remove any rows where all critical fields are empty
    df_final = df_final.dropna(subset=["Attendance Date", "Employee", "Status"], how="all")

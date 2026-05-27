@@ -138,6 +138,12 @@ def determine_status(working_hours: float, total_hours: float, status_raw: str) 
         return "Absent"
 
 
+leave_type_map = {
+    "CL": "Casual Leave", "PL": "Privilege Leave", "SL": "Sick Leave",
+    "ML": "Maternity Leave", "CO": "Compensatory Off", "LWP": "Leave Without Pay",
+}
+
+
 def detect_shift(in_time: Optional[str]) -> str:
     """
     Detect shift with 1-hour grace period for late arrivals.
@@ -358,6 +364,8 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
             if status == "Holiday":
                 continue
 
+            leave_type = leave_type_map.get(str(status_val).strip().upper() if pd.notna(status_val) else "", "")
+
             # Auto-detect shift
             shift = detect_shift(in_time_str) if in_time_str else ""
 
@@ -376,7 +384,8 @@ def clean_daily_inout12(input_path: str, output_path: str, company: str = None, 
                 "Branch": branch if branch else "",
                 "Working Hours": work_hrs,
                 "Shift": shift,
-                "Over Time": overtime_val
+                "Over Time": overtime_val,
+                "Leave Type": leave_type,
             }
             records.append(rec)
 

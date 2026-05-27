@@ -60,6 +60,12 @@ def map_status(raw_status) -> str:
     return mapping.get(s, s if s else "Absent")
 
 
+leave_type_map = {
+    "CL": "Casual Leave", "PL": "Privilege Leave", "SL": "Sick Leave",
+    "ML": "Maternity Leave", "CO": "Compensatory Off", "LWP": "Leave Without Pay",
+}
+
+
 def format_datetime(date_val, time_val):
     if pd.isna(date_val) or pd.isna(time_val):
         return None
@@ -181,7 +187,9 @@ def clean_daily_inout29(input_path: str, output_path: str, company: str = None, 
         att_date = row.get("Date")
         gp_no = row.get("IDNo") if pd.notna(row.get("IDNo")) else ""
         emp_name = str(row.get("Workmen")).strip() if pd.notna(row.get("Workmen")) else ""
+        raw_st = "" if pd.isna(row.get("Status")) else str(row.get("Status")).strip()
         status = map_status(row.get("Status"))
+        leave_type = leave_type_map.get(raw_st, "")
         in_time = format_datetime(att_date, row.get("In Time"))
         out_time = format_datetime(att_date, row.get("Out Time"))
         shift = _clean_shift_value(row.get("Shift"))
@@ -210,6 +218,7 @@ def clean_daily_inout29(input_path: str, output_path: str, company: str = None, 
             "Shift": shift,
             "Company": company or "",
             "Branch": branch or "",
+            "Leave Type": leave_type,
         })
 
     df_final = pd.DataFrame.from_records(
@@ -219,7 +228,7 @@ def clean_daily_inout29(input_path: str, output_path: str, company: str = None, 
             # "Gate Pass No", 
             "Employee", "Employee Name",
             "Status", "In Time", "Out Time", "Working Hours",
-            "Over Time", "Shift", "Company", "Branch",
+            "Over Time", "Shift", "Company", "Branch", "Leave Type",
         ],
     )
 

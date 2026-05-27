@@ -202,6 +202,12 @@ def map_status(raw_status) -> str:
    return mapping.get(s, s)
 
 
+leave_type_map = {
+    "CL": "Casual Leave", "PL": "Privilege Leave", "SL": "Sick Leave",
+    "ML": "Maternity Leave", "CO": "Compensatory Off", "LWP": "Leave Without Pay",
+}
+
+
 def extract_gp_and_name_from_gprow(row_cells):
     """
     Scan a GP row (list of cell values) and extract (gp_no, emp_name).
@@ -347,6 +353,7 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
                continue
 
            status_mapped = map_status(st_val)
+           leave_type = leave_type_map.get("" if pd.isna(st_val) else str(st_val).strip(), "")
 
             # skip holidays
         #    if status_mapped == "Holiday":
@@ -369,6 +376,7 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
                 ),
                "Company": company if company else "Vaaman Engineers India Limited",
                "Branch": branch if branch else "",
+               "Leave Type": leave_type,
            }
            records.append(rec)
 
@@ -384,9 +392,10 @@ def clean_daily_inout4(input_path: str, output_path: str, company: str = None, b
            "Out Time",
            "Working Hours",
            "Over Time",
-           "Shift", 
+           "Shift",
            "Company",
            "Branch",
+           "Leave Type",
        ],
    )
 
