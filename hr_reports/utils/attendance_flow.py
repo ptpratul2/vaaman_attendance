@@ -395,23 +395,23 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout2 for Jharsuguda")
 
-        elif doc.branch in ["Bellari obp2"]:
+        elif doc.branch in ["Bellari obp2","Bellari (JVML & STEEL)","JVML Bellari - VEIL"]:
             clean_daily_inout30(
                 input_path=local_path,
                 output_path=cleaned_path,
                 company=doc.company,
                 branch=doc.branch
             )
-            append_log(doc, "Step 2: Used clean_daily_inout30 for PARADIP")
+            append_log(doc, "Step 2: Used clean_daily_inout30 for Bellary")
 
-        elif doc.branch in ["Bellari (JVML & STEEL)"]:
+        elif doc.branch in ["KCL MUNDRA - VEIL"]:
             clean_daily_inout30_2(
                 input_path=local_path,
                 output_path=cleaned_path,
                 company=doc.company,
                 branch=doc.branch
             )
-            append_log(doc, "Step 2: Used clean_daily_inout30 for PARADIP")
+            append_log(doc, "Step 2: Used clean_daily_inout30_2 for KCL Mundra")
 
         elif doc.branch in ["PARADIP", "JSW Paradeep"]:
             clean_daily_inout29(
@@ -528,7 +528,7 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout16 for Polycab rptDAttendanceReg format")
 
-        elif doc.branch in ["Hirakud FRP"]:
+        elif doc.branch in ["Hirakud FRP","Hirakud Smelter"]:
             clean_daily_inout17(
                 input_path=local_path,
                 output_path=cleaned_path,
@@ -537,7 +537,7 @@ def process_uploaded_file(doc, method):
             )
             append_log(doc, "Step 2: Used clean_daily_inout17 for Hirakud FRP row-based format")
 
-        elif doc.branch in ["Hirakud Smelter"]:
+        elif doc.branch in [""]:
             clean_daily_inout18(
                 input_path=local_path,
                 output_path=cleaned_path,

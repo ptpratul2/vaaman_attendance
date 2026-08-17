@@ -127,16 +127,6 @@ def calculate_working_hours(in_time: Optional[str], out_time: Optional[str]) -> 
         return 0.0
 
 
-def format_working_hours(hours: float) -> str:
-    """Convert decimal hours to HH:MM format"""
-    if hours <= 0:
-        return "00:00"
-
-    h = int(hours)
-    m = int((hours - h) * 60)
-    return f"{h:02d}:{m:02d}"
-
-
 def detect_shift(in_time: Optional[str], out_time: Optional[str]) -> str:
     """
     Detect shift code based on punch-in time windows.
@@ -335,7 +325,6 @@ def clean_daily_inout30(input_path: str, output_path: str, company: str = None, 
 
         # Calculate working hours from first IN to last OUT
         work_hours_decimal = calculate_working_hours(first_in, last_out)
-        work_hours_formatted = format_working_hours(work_hours_decimal)
 
         # Determine status based on working hours
         status = determine_status(work_hours_decimal)
@@ -354,7 +343,7 @@ def clean_daily_inout30(input_path: str, output_path: str, company: str = None, 
             "Status": status,
             "In Time": first_in or "",
             "Out Time": last_out or "",
-            "Working Hours": work_hours_formatted,
+            "Working Hours": work_hours_decimal,
             "Over Time": overtime,
             "Shift": shift_code,
             "Company": company if company else "Vaaman Engineers India Limited",
