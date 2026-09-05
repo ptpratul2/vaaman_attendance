@@ -43,20 +43,55 @@ import pandas as pd
 # -------------------------
 # Helpers
 # -------------------------
+def read_attendance_file(input_path: str) -> pd.DataFrame:
+    """
+    Read attendance report whether it is:
+    - real .xlsx (ZIP / PK header)
+    - real .xls (OLE2 / D0 CF 11 E0 header)
+    - tab-separated text saved with a .xls extension
+    """
+    with open(input_path, "rb") as f:
+        header = f.read(16)
+
+    if header.startswith(b"PK"):
+        print("[clean_daily_inout17] Detected real .xlsx workbook")
+        return pd.read_excel(input_path, engine="openpyxl", header=0)
+
+    if header.startswith(b"\xD0\xCF\x11\xE0"):
+        print("[clean_daily_inout17] Detected real .xls workbook")
+        return pd.read_excel(input_path, engine="xlrd", header=0)
+
+    print("[clean_daily_inout17] Detected tab-separated text (not a real Excel file)")
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            return pd.read_csv(input_path, sep="\t", header=0, encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return pd.read_csv(input_path, sep="\t", header=0, encoding="latin-1")
+
+
+def parse_date_value(date_val):
+    """Parse Excel datetime or DD/MM/YYYY text into a datetime."""
+    if isinstance(date_val, datetime):
+        return date_val
+    return pd.to_datetime(date_val, dayfirst=True)
+
+
 def combine_date_time(date_val, time_val) -> Optional[str]:
     """
     Combine a date value and a time value into 'YYYY-MM-DD HH:MM:SS'.
+    Accepts Excel datetimes, HH:MM:SS, and 12-hour AM/PM times.
     """
     if pd.isna(date_val) or pd.isna(time_val):
         return None
 
     try:
-        date_obj = date_val if isinstance(date_val, datetime) else pd.to_datetime(date_val)
+        date_obj = parse_date_value(date_val)
 
         if isinstance(time_val, datetime):
             time_obj = time_val.time()
         else:
-            time_obj = pd.to_datetime(str(time_val), format="%H:%M:%S").time()
+            time_obj = pd.to_datetime(str(time_val).strip()).time()
 
         combined = datetime.combine(date_obj.date(), time_obj)
         return combined.strftime("%Y-%m-%d %H:%M:%S")
@@ -193,7 +228,7 @@ def clean_daily_inout17(input_path: str, output_path: str, company: str = None, 
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    df = pd.read_excel(input_path, header=0)
+    df = read_attendance_file(input_path)
     df.columns = df.columns.str.strip()
     print(f"[clean_daily_inout17] Raw shape: {df.shape}")
     print(f"[clean_daily_inout17] Columns: {df.columns.tolist()}")
@@ -237,7 +272,7 @@ def clean_daily_inout17(input_path: str, output_path: str, company: str = None, 
                 emp_code = ""
                 print(f"[clean_daily_inout17] Error looking up Token {id_normalized}: {e} - keeping blank")
 
-            date_obj = date_val if isinstance(date_val, datetime) else pd.to_datetime(date_val)
+            date_obj = parse_date_value(date_val)
             date_str = date_obj.strftime("%Y-%m-%d")
 
             in_time = combine_date_time(row.get("Check In Date"), row.get("Check In Time"))
